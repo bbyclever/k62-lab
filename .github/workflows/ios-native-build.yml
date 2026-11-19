@@ -32,3 +32,34 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Build iPhone app for sideload signing (unsigned)
+        working-directory: native
+        run: |
+          set -eo pipefail
+          xcodebuild \
+            -project K62LabNative.xcodeproj \
+            -scheme K62LabNative \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/k62-ios-device" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned device IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/k62-ios-device/Build/Products/Debug-iphoneos/K62LabNative.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/k62-package/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/k62-package/Payload/"
+          cd "$RUNNER_TEMP/k62-package"
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/K62LabNative-unsigned.ipa" Payload
+          /usr/bin/unzip -tq "$GITHUB_WORKSPACE/K62LabNative-unsigned.ipa"
+
+      - name: Upload unsigned IPA (requires signing before installing)
+        uses: actions/upload-artifact@v4
+        with:
+          name: K62LabNative-unsigned-ipa
+          path: K62LabNative-unsigned.ipa
+          retention-days: 7
