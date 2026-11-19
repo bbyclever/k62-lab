@@ -1,1 +1,85 @@
-a
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07111e" />
+  <meta name="description" content="K62 Lab: explorador Bluetooth Low Energy de solo lectura para smartwatch K62" />
+  <title>K62 Lab · BLE Explorer</title>
+  <style>
+    :root{color-scheme:dark;--bg:#07111e;--panel:#101e2f;--panel2:#14273a;--border:#284056;--txt:#edf6ff;--sub:#9cb3c8;--aqua:#50e2c4;--blue:#71b9ff;--red:#ff9e99;--yellow:#efcb83}
+    *{box-sizing:border-box} html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--txt)}
+    body{padding:max(24px,env(safe-area-inset-top)) 18px max(30px,env(safe-area-inset-bottom))}
+    .shell{max-width:750px;margin:auto}.eyebrow{font-size:11px;letter-spacing:.15em;font-weight:700;color:var(--aqua);text-transform:uppercase}
+    h1{font-size:30px;letter-spacing:-.055em;margin:8px 0 7px;font-weight:750} h2{font-size:17px;margin:0 0 8px}p{line-height:1.5}
+    .muted{color:var(--sub);font-size:13px}.top{margin-bottom:22px}.pill{display:inline-flex;align-items:center;gap:7px;background:#192c3f;color:var(--sub);padding:7px 11px;border-radius:30px;font-size:12px}
+    .dot{width:8px;height:8px;border-radius:50%;background:#8c9aac}.dot.on{background:var(--aqua)}.card{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:18px;margin-bottom:14px}
+    .hero{background:linear-gradient(145deg,#153144,#0c1b2c);border-color:#2c5a62}.herotop{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+    .buttons{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}button{font:inherit;font-weight:650;border-radius:12px;padding:11px 13px;min-height:44px;border:1px solid #426379;background:var(--panel2);color:var(--txt);cursor:pointer}
+    button.primary{background:var(--aqua);color:#062124;border-color:var(--aqua)}button.secondary{background:#22364a}button:disabled{opacity:.36;cursor:not-allowed}button:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.chars{display:flex;flex-direction:column;gap:9px;margin-top:14px}.char{border:1px solid var(--border);border-radius:13px;background:#0b1a2a;padding:12px}
+    .charhead{display:flex;justify-content:space-between;align-items:center;gap:8px}.charname{font-weight:700;letter-spacing:.015em}.charpath{font-size:11px;color:var(--sub);overflow-wrap:anywhere;margin-top:5px}
+    .value{border-radius:9px;background:#17283a;color:#b9e9fd;word-break:break-word;padding:10px;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;margin-top:9px;min-height:37px}
+    .char button{min-width:77px;padding:7px 10px;min-height:37px;font-size:12px}.charbuttons{display:flex;gap:6px;flex-wrap:wrap}.log{background:#06111c;border:1px solid #2c4256;border-radius:11px;padding:12px;overflow:auto;max-height:320px;min-height:90px;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;color:#b9cfdf}
+    .notice{border-left:3px solid var(--yellow);padding:10px 13px;background:#282819;border-radius:0 12px 12px 0;color:#f8e3ba;font-size:12px;line-height:1.5;margin-top:14px}
+    footer{font-size:11px;color:var(--sub);text-align:center;padding:11px 3px}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.count{background:#1c3748;border-radius:30px;padding:4px 8px;font-size:11px;color:var(--aqua)}
+    @media(max-width:480px){body{padding-left:12px;padding-right:12px}.card{padding:14px}.charhead{align-items:flex-start}h1{font-size:27px}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <div class="top"><div class="eyebrow">Laboratorio de ingeniería inversa · v0.1</div><h1>K62 Lab <span style="color:var(--aqua)">/ BLE</span></h1><p class="muted">Explorador de solo lectura para tu reloj FitCloudPro. No instala firmware, no envía comandos de modificación y no transmite registros a ningún servidor.</p></div>
+  <section class="card hero" aria-label="Conexión">
+    <div class="herotop"><div><div class="eyebrow">Estado de la conexión</div><h2 id="deviceName" style="margin:7px 0 0">Sin dispositivo</h2></div><div class="pill"><span class="dot" id="stateDot"></span><span id="statusText">Desconectado</span></div></div>
+    <p class="muted" id="browserStatus">Comprobando soporte de Web Bluetooth…</p>
+    <div class="buttons"><button class="primary" id="connectBtn">Conectar K62</button><button id="disconnectBtn" disabled>Desconectar</button><button class="secondary" id="readAllBtn" disabled>Leer valores</button></div>
+    <div class="notice">Importante: abre esta página por HTTPS en <strong>Bluefy</strong> o en un Safari con extensión Web Bluetooth habilitada. Selecciona el <strong>K62</strong> en el selector Bluetooth. Si FitCloudPro mantiene la conexión exclusiva, ciérrala temporalmente. No abras actualizaciones DFU.</div>
+  </section>
+  <section class="card">
+    <div class="toolbar"><div><div class="eyebrow">Mapa GATT</div><h2 style="margin:5px 0 0">Lecturas seguras</h2></div><span class="count">5 características</span></div>
+    <p class="muted">Las interpretaciones se mantienen pendientes hasta comparar lecturas reales. Las suscripciones escuchan cambios; no envían órdenes personalizadas.</p>
+    <div class="chars" id="charList"></div>
+  </section>
+  <section class="card">
+    <div class="toolbar"><div><div class="eyebrow">Captura local</div><h2 style="margin:5px 0 0">Registro de eventos</h2></div><span class="count" id="logCount">0 eventos</span></div>
+    <div class="buttons" style="margin-bottom:11px"><button id="exportBtn">Exportar JSON</button><button id="copyBtn">Copiar registro</button><button id="clearBtn">Limpiar</button></div>
+    <div id="log" class="log" aria-live="polite">Sin eventos. Pulsa «Conectar K62» para comenzar.</div>
+  </section>
+  <footer>K62 Lab no es una aplicación oficial de Hetang Smart. Proyecto experimental de lectura BLE. Tus registros permanecen en este navegador salvo que decidas exportarlos.</footer>
+</main>
+<script>
+'use strict';
+const BASE='-0000-1000-8000-00805f9b34fb';
+const short=id=>('0000'+id.toLowerCase())+BASE;
+const MAIN='000001ff-3c17-d293-8e48-14fe2e4da212';
+const D0FF='0000d0ff-3c17-d293-8e48-14fe2e4da212';
+const FEE7=short('fee7');
+const entries=[
+ {id:'fec9',service:FEE7,char:short('fec9'),label:'Identificador Bluetooth',note:'FEE7 / FEC9 · Read'},
+ {id:'fea1',service:FEE7,char:short('fea1'),label:'Paquete de estado',note:'FEE7 / FEA1 · Read, Notify',subscribe:true},
+ {id:'ff04',service:MAIN,char:short('ff04'),label:'Valor interno FF04',note:'01FF / FF04 · Read'},
+ {id:'ffd2',service:D0FF,char:short('ffd2'),label:'Identificadores internos',note:'D0FF / FFD2 · Read'},
+ {id:'fff3',service:D0FF,char:short('fff3'),label:'Parámetro FFF3',note:'D0FF / FFF3 · Read'}
+];
+let device=null, server=null, events=[], subscriptions=new Map();
+const $=id=>document.getElementById(id);
+const timestamp=()=>new Date().toISOString();
+function bytesOf(dv){return Array.from(new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength));}
+function hexOf(dv){return bytesOf(dv).map(v=>v.toString(16).padStart(2,'0').toUpperCase()).join(' ')}
+function logEvent(type,details={}){events.push({at:timestamp(),type,...details});if(events.length>1500)events.shift();renderLog()}
+function renderLog(){ $('logCount').textContent=events.length+' eventos';$('log').textContent=events.length?events.slice(-100).map(e=>'['+new Date(e.at).toLocaleTimeString('es-CL')+'] '+e.type+(e.characteristic?' '+e.characteristic:'')+(e.hex?' → '+e.hex:'')+(e.message?' · '+e.message:'')).join('\n'):'Sin eventos.'; $('log').scrollTop=$('log').scrollHeight;}
+function setConnected(connected){$('connectBtn').disabled=connected;$('disconnectBtn').disabled=!connected;$('readAllBtn').disabled=!connected;$('statusText').textContent=connected?'Conectado':'Desconectado';$('stateDot').classList.toggle('on',connected);$('deviceName').textContent=connected?(device?.name||'Reloj BLE'):'Sin dispositivo';entries.forEach(e=>{$('read-'+e.id).disabled=!connected; if(e.subscribe)$('sub-'+e.id).disabled=!connected;});}
+function draw(){let root=$('charList');entries.forEach(e=>{let article=document.createElement('article');article.className='char';let head=document.createElement('div');head.className='charhead';let names=document.createElement('div');let name=document.createElement('div');name.className='charname';name.textContent=e.label;let path=document.createElement('div');path.className='charpath';path.textContent=e.note;names.append(name,path);let buttons=document.createElement('div');buttons.className='charbuttons';let read=document.createElement('button');read.textContent='Leer';read.id='read-'+e.id;read.disabled=true;read.addEventListener('click',()=>readEntry(e));buttons.append(read);if(e.subscribe){let sub=document.createElement('button');sub.id='sub-'+e.id;sub.textContent='Escuchar';sub.disabled=true;sub.addEventListener('click',()=>toggleSubscribe(e));buttons.append(sub);}head.append(names,buttons);let value=document.createElement('div');value.className='value';value.id='value-'+e.id;value.textContent='Sin lectura';article.append(head,value);root.append(article);});}
+async function characteristic(e){if(!server||!server.connected)throw new Error('Conecta primero el reloj');let svc=await server.getPrimaryService(e.service);return await svc.getCharacteristic(e.char);}
+async function readEntry(e){try{const c=await characteristic(e);const result=hexOf(await c.readValue());$('value-'+e.id).textContent=result||'(sin bytes)';logEvent('READ',{characteristic:e.id.toUpperCase(),hex:result});}catch(err){$('value-'+e.id).textContent='Error: '+err.message;logEvent('ERROR',{characteristic:e.id.toUpperCase(),message:err.message})}}
+async function toggleSubscribe(e){const b=$('sub-'+e.id);try{if(subscriptions.has(e.id)){const c=subscriptions.get(e.id);await c.stopNotifications();subscriptions.delete(e.id);b.textContent='Escuchar';logEvent('NOTIFY OFF',{characteristic:e.id.toUpperCase()});return;}const c=await characteristic(e);c.addEventListener('characteristicvaluechanged',ev=>{let result=hexOf(ev.target.value);$('value-'+e.id).textContent=result||'(sin bytes)';logEvent('NOTIFY',{characteristic:e.id.toUpperCase(),hex:result});});await c.startNotifications();subscriptions.set(e.id,c);b.textContent='Detener';logEvent('NOTIFY ON',{characteristic:e.id.toUpperCase()});}catch(err){logEvent('ERROR',{characteristic:e.id.toUpperCase(),message:err.message});}}
+async function connect(){if(!navigator.bluetooth){logEvent('ERROR',{message:'Web Bluetooth no disponible. Abre la página con Bluefy o con una extensión compatible.'});return;}try{logEvent('SCAN',{message:'Solicitando dispositivo cercano'});device=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[FEE7,MAIN,D0FF]});device.addEventListener('gattserverdisconnected',()=>{subscriptions.clear();entries.filter(e=>e.subscribe).forEach(e=>{$('sub-'+e.id).textContent='Escuchar'});setConnected(false);logEvent('DISCONNECTED',{message:'El dispositivo perdió la conexión'});});server=await device.gatt.connect();setConnected(true);logEvent('CONNECTED',{message:device.name||'Dispositivo BLE'});}catch(err){logEvent('ERROR',{message:err.message});setConnected(false);}}
+function disconnect(){if(device?.gatt?.connected)device.gatt.disconnect();setConnected(false)}
+async function readAll(){for(const e of entries){if(!server?.connected)break;await readEntry(e);}}
+function saveJson(){const blob=new Blob([JSON.stringify({app:'K62 Lab v0.1',exportedAt:timestamp(),note:'Registros locales BLE',events},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='k62-ble-log-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1200)}
+$('connectBtn').onclick=connect;$('disconnectBtn').onclick=disconnect;$('readAllBtn').onclick=readAll;$('exportBtn').onclick=saveJson;
+$('clearBtn').onclick=()=>{events=[];renderLog()};$('copyBtn').onclick=async()=>{let value=JSON.stringify(events,null,2);try{await navigator.clipboard.writeText(value);$('copyBtn').textContent='Copiado';setTimeout(()=>$('copyBtn').textContent='Copiar registro',1700)}catch(e){logEvent('ERROR',{message:'No se pudo copiar: '+e.message})}};
+draw();setConnected(false);$('browserStatus').textContent=navigator.bluetooth?'Web Bluetooth detectado. Puedes intentar conectar el reloj.':'Web Bluetooth no está disponible aquí. Abre esta página desde Bluefy para poder conectar el K62.';
+</script>
+</body>
+</html>
