@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import Combine
 
 final class K62BluetoothManager: NSObject, ObservableObject {
     @Published private(set) var status = "Iniciando Core Bluetooth…"
