@@ -28,7 +28,7 @@
 </head>
 <body>
 <main class="shell">
-  <div class="top"><div class="eyebrow">Laboratorio de ingeniería inversa · v0.7</div><h1>K62 Lab <span style="color:var(--aqua)">/ BLE</span></h1><p class="muted">Explorador de solo lectura para tu reloj FitCloudPro. No instala firmware, no envía comandos de modificación y no transmite registros a ningún servidor.</p></div>
+  <div class="top"><div class="eyebrow">Laboratorio de ingeniería inversa · v0.8</div><h1>K62 Lab <span style="color:var(--aqua)">/ BLE</span></h1><p class="muted">Explorador de solo lectura para tu reloj FitCloudPro. No instala firmware, no envía comandos de modificación y no transmite registros a ningún servidor.</p></div>
   <section class="card hero" aria-label="Conexión">
     <div class="herotop"><div><div class="eyebrow">Estado de la conexión</div><h2 id="deviceName" style="margin:7px 0 0">Sin dispositivo</h2></div><div class="pill"><span class="dot" id="stateDot"></span><span id="statusText">Desconectado</span></div></div>
     <p class="muted" id="browserStatus">Comprobando soporte de Web Bluetooth…</p>
@@ -90,39 +90,50 @@ function registerDisconnect(dev){if(disconnectListeners.has(dev))return;dev.addE
 async function connectSelected(dev,source){device=dev;registerDisconnect(device);showFeedback('Conectando con '+(device.name||'dispositivo autorizado')+'…');server=await device.gatt.connect();setConnected(true);showFeedback('Conexión BLE establecida con '+(device.name||'dispositivo autorizado')+' mediante '+source+'.');logEvent('CONNECTED',{message:(device.name||'Dispositivo BLE')+' · '+source});}
 async function connect(mode='name'){if(!navigator.bluetooth){logEvent('ERROR',{message:'Web Bluetooth no disponible. Abre la página con Bluefy o con una extensión compatible.'});return;}try{logEvent('SCAN',{message:mode==='all'?'Buscando todos los dispositivos BLE':'Buscando dispositivos anunciados como K62'});const options=mode==='all'?{acceptAllDevices:true,optionalServices:[FEE7,MAIN,D0FF]}:{filters:[{namePrefix:'K62'}],optionalServices:[FEE7,MAIN,D0FF]};const found=await navigator.bluetooth.requestDevice(options);await connectSelected(found,'selección manual');}catch(err){logEvent('ERROR',{message:err.message||String(err)});setConnected(false);}}
 async function reconnectAuthorized(){
-if(!navigator.bluetooth){showFeedback('Web Bluetooth no está disponible en este navegador. Abre el sitio en Bluefy.');logEvent('ERROR',{message:'Web Bluetooth no disponible'});return;}
+if(!navigator.bluetooth){showFeedback('Web Bluetooth no está disponible. Abre este sitio en Bluefy.');logEvent('ERROR',{phase:'soporte Web Bluetooth',message:'navigator.bluetooth ausente'});return;}
 $('reconnectBtn').disabled=true;
-showFeedback('Comprobando permisos Bluetooth anteriores…');
-try{
+let phase='inicialización';
+showFeedback('Comprobando permisos de este sitio…');
+logEvent('RECONNECT DIAG',{phase,message:'Diagnóstico iniciado: no modifica los dispositivos emparejados'});
+try {
 let previous=device;
-if(!previous){
-if(typeof navigator.bluetooth.getDevices!=='function'){
-showFeedback('Bluefy no expone getDevices() aquí. No puede recuperar la autorización anterior: usa «Buscar K62» o prueba una aplicación nativa.');
-logEvent('RECONNECT UNAVAILABLE',{message:'getDevices() no disponible en esta sesión'});
-return;
+if(!previous) {
+  phase='consultar getDevices()';
+  if(typeof navigator.bluetooth.getDevices!=='function') {
+    showFeedback('Bluefy no ofrece getDevices() en esta sesión. No se puede recuperar el reloj sin el selector.');
+    logEvent('RECONNECT UNAVAILABLE',{phase,message:'getDevices() no disponible'});
+    return;
+  }
+  logEvent('RECONNECT DIAG',{phase,message:'Solicitando lista de dispositivos autorizados por este sitio'});
+  const authorized=await navigator.bluetooth.getDevices();
+  const matches=authorized.filter(d=>/^K62/i.test(d.name||''));
+  logEvent('AUTHORIZED LIST',{phase,total:authorized.length,matches:matches.length,message:authorized.length+' autorizado(s), '+matches.length+' K62'});
+  if(!matches.length) {
+    showFeedback('getDevices() funcionó, pero este sitio no tiene un K62 autorizado. Los dos K62 de Ajustes del iPhone son independientes.');
+    return;
+  }
+  previous=matches[0];
 }
-const authorized=await navigator.bluetooth.getDevices();
-const matches=authorized.filter(d=>/^K62/i.test(d.name||''));
-logEvent('AUTHORIZED LIST',{message:authorized.length+' dispositivo(s) autorizado(s), '+matches.length+' identificado(s) como K62'});
-if(matches.length===0){
-showFeedback('No hay ningún K62 autorizado para este sitio en Bluefy ('+authorized.length+' permiso(s) BLE encontrados). Esto es independiente de los K62 emparejados en Ajustes del iPhone.');
-return;
-}
-if(matches.length>1){
-showFeedback('Bluefy conserva '+matches.length+' K62 autorizados; se intentará el primero. No se modifica el emparejamiento.');
-}
-previous=matches[0];
-}
-logEvent('RECONNECT ATTEMPT',{message:'Reutilizando referencia BLE autorizada, sin escaneo nuevo'});
+phase='conexión GATT';
+showFeedback('Encontré una referencia al K62. Probando acceso GATT…');
+logEvent('RECONNECT ATTEMPT',{phase,message:'Probando gatt.connect() sobre dispositivo autorizado'});
 await connectSelected(previous,'reconexión autorizada');
-}catch(err){showFeedback('No se pudo reconectar: '+(err.message||String(err))+'. FitCloudPro puede mantener ocupada la conexión BLE.');logEvent('ERROR',{message:'Reconexión: '+(err.message||String(err))});setConnected(false);}
-finally{$('reconnectBtn').disabled=!!server?.connected;}
+} catch(err) {
+  const message=err?.message||String(err);
+  const kind=err?.name||typeof err;
+  const code=typeof err?.code==='number'?err.code:null;
+  showFeedback('Falló en «'+phase+'»: '+message+' ('+kind+(code!==null?', código '+code:'')+'). No confirma bloqueo de FitCloudPro.');
+  logEvent('RECONNECT ERROR',{phase,name:kind,code,message});
+  setConnected(false);
+} finally {
+  $('reconnectBtn').disabled=!!server?.connected;
+}
 }
 function disconnect(){if(device?.gatt?.connected)device.gatt.disconnect();subscriptions.clear();setConnected(false)}
 function setPassiveControls(){const connected=!!server?.connected;document.querySelectorAll('.actionBtn').forEach(b=>b.disabled=!connected||!passiveActive);entries.forEach(e=>{if($('read-'+e.id))$('read-'+e.id).disabled=!connected||passiveActive;if(e.subscribe)$('sub-'+e.id).disabled=!connected||passiveActive;});$('readAllBtn').disabled=!connected||passiveActive;$('passiveBtn').disabled=!connected;$('passiveBtn').textContent=passiveActive?'Finalizar escucha pasiva':'Iniciar escucha pasiva';}
 async function passiveToggle(){const channels=entries.filter(e=>e.id==='fea1'||e.id==='ff03');if(!server?.connected)return;if(passiveActive){for(const e of channels)if(subscriptions.has(e.id))await toggleSubscribe(e);passiveActive=false;setPassiveControls();logEvent('PASSIVE STOP',{message:'Fin de escucha pasiva de FEA1 y FF03'});return;}if(channels.some(e=>subscriptions.has(e.id))){logEvent('INFO',{message:'Detén primero las suscripciones normales de FEA1 y FF03'});return;}for(const e of channels)await toggleSubscribe(e);if(channels.some(e=>subscriptions.has(e.id))){passiveActive=true;setPassiveControls();logEvent('PASSIVE START',{message:'Capturando FEA1 y FF03 sin lecturas GATT; marca las acciones desde el panel'});}}
 async function readAll(){if(passiveActive)return;$('passiveBtn').disabled=true;for(const e of entries){if(!server?.connected)break;if(e.id==='ff03')continue;await readEntry(e);}$('passiveBtn').disabled=!server?.connected;}
-function saveJson(){const blob=new Blob([JSON.stringify({app:'K62 Lab v0.7',exportedAt:timestamp(),note:'Registros locales BLE',events},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='k62-ble-log-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1200)}
+function saveJson(){const blob=new Blob([JSON.stringify({app:'K62 Lab v0.8',exportedAt:timestamp(),note:'Registros locales BLE',events},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='k62-ble-log-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1200)}
 document.querySelectorAll('.actionBtn').forEach(button=>button.onclick=()=>{if(passiveActive)logEvent('ACTION MARKER',{message:button.dataset.action});});
 $('connectBtn').onclick=()=>connect('name');$('scanAllBtn').onclick=()=>connect('all');$('reconnectBtn').onclick=reconnectAuthorized;$('disconnectBtn').onclick=disconnect;$('readAllBtn').onclick=readAll;$('passiveBtn').onclick=passiveToggle;$('exportBtn').onclick=saveJson;
 $('clearBtn').onclick=()=>{events=[];renderLog()};$('copyBtn').onclick=async()=>{let value=JSON.stringify(events,null,2);try{await navigator.clipboard.writeText(value);$('copyBtn').textContent='Copiado';setTimeout(()=>$('copyBtn').textContent='Copiar registro',1700)}catch(e){logEvent('ERROR',{message:'No se pudo copiar: '+e.message})}};
