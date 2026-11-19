@@ -1,0 +1,34 @@
+name: K62 Lab Native - compile without signing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios-simulator:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+      - name: Verify Xcode
+        run: xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: native
+        run: xcodegen generate --spec project.yml
+      - name: Compile iOS Simulator build (no signing)
+        working-directory: native
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project K62LabNative.xcodeproj \
+            -scheme K62LabNative \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
