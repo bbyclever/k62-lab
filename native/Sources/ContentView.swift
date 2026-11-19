@@ -57,8 +57,8 @@ struct ContentView: View {
                 }
 
                 Section("Registro local") {
-                    ForEach(Array(bluetooth.logs.enumerated()), id: \.offset) { _, event in
-                        Text(event).font(.caption.monospaced())
+                    ForEach(Array(bluetooth.logs.enumerated()), id: \.offset) { entry in
+                        Text(entry.element).font(.caption.monospaced())
                     }
                     Text("No se envían datos a ningún servidor. Sin escrituras BLE ni firmware DFU.")
                         .font(.caption)
