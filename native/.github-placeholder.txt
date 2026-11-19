@@ -1,0 +1,1 @@
+Esta carpeta contiene el prototipo nativo SwiftUI. El workflow real de GitHub Actions se guarda en /.github/workflows/ios-native-build.yml.
