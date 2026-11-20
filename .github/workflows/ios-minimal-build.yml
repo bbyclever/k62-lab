@@ -8,7 +8,7 @@ on:
       - ".github/workflows/ios-minimal-build.yml"
 
 permissions:
-  contents: read
+  contents: write  # publish the IPA as the "ios-latest" release
 
 jobs:
   build:
@@ -71,3 +71,17 @@ jobs:
           name: K62Minimal-unsigned-ipa
           path: K62Minimal-unsigned.ipa
           retention-days: 14
+
+      # Stable download link without GitHub login:
+      # https://github.com/<owner>/<repo>/releases/download/ios-latest/K62Minimal-unsigned.ipa
+      - name: Publish IPA as release "ios-latest"
+        if: github.ref == 'refs/heads/main'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-latest --yes --cleanup-tag || true
+          gh release create ios-latest K62Minimal-unsigned.ipa \
+            --target "${{ github.sha }}" --prerelease \
+            --title "K62 Minimal iOS (sin firmar)" \
+            --notes "IPA sin firmar compilado desde ${{ github.sha }}. Fírmalo con tu Apple ID (SideStore/Sideloadly) antes de instalar."
