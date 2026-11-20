@@ -1,0 +1,35 @@
+name: K62Minimal
+options:
+  bundleIdPrefix: dev.k62lab
+targets:
+  K62Minimal:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Sources
+      - path: Resources
+        buildPhase: resources
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: K62 Minimal
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [bluetooth-central]
+        NSBluetoothAlwaysUsageDescription: "K62 Minimal se conecta a tu reloj K62 para avisos, llamadas, música y esferas."
+        NSBluetoothPeripheralUsageDescription: "K62 Minimal se conecta a tu reloj K62."
+        NSSpeechRecognitionUsageDescription: "Para convertir en texto las respuestas que dictas en el reloj."
+        NSMicrophoneUsageDescription: "Para procesar mensajes de voz enviados desde el reloj."
+        NSPhotoLibraryUsageDescription: "Para usar una foto tuya como fondo de esfera."
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.k62lab.minimal
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
+        ENABLE_BITCODE: "NO"

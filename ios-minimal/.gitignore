@@ -1,0 +1,7 @@
+Vendor/
+Pods/
+Podfile.lock
+Generated/
+*.xcodeproj
+*.xcworkspace
+build/

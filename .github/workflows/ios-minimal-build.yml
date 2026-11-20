@@ -1,0 +1,64 @@
+name: K62 Minimal iOS - build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ios-minimal/**"
+      - ".github/workflows/ios-minimal-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ios-minimal
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch official FitCloudPro SDK
+        run: git clone --depth 1 https://github.com/htangsmart/FitCloudPro-SDK-iOS.git Vendor/FitCloudPro-SDK-iOS
+
+      - name: Tools
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          pod --version
+
+      - name: Generate project and install pods
+        run: |
+          xcodegen generate --spec project.yml
+          pod install
+
+      - name: Build for iPhone (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace K62Minimal.xcworkspace \
+            -scheme K62Minimal \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/K62Minimal.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/pkg/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/pkg/Payload/"
+          cd "$RUNNER_TEMP/pkg"
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/K62Minimal-unsigned.ipa" Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: K62Minimal-unsigned-ipa
+          path: K62Minimal-unsigned.ipa
+          retention-days: 14

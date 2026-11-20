@@ -1,0 +1,6 @@
+bleak>=3.0
+aiohttp>=3.9
+winrt-Windows.Media.Control
+winrt-Windows.UI.Notifications
+winrt-Windows.UI.Notifications.Management
+winrt-Windows.ApplicationModel

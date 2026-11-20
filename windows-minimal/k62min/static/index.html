@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K62 Minimal Control</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d10;--card:#13161b;--line:#232830;--txt:#e8ecf1;--sub:#8b95a3;--acc:#5ee0b5;--warn:#f0c674;--bad:#ff8a80;--btn:#1c2128}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 "Segoe UI",system-ui,sans-serif;padding:24px 16px 40px}
+main{max-width:1100px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+h1{font-size:20px;font-weight:600;margin:0;letter-spacing:-.01em}
+h2{font-size:13px;font-weight:600;margin:0;text-transform:uppercase;letter-spacing:.08em;color:var(--sub)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
+.tag{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);color:var(--sub);white-space:nowrap}
+.tag.native{color:var(--acc);border-color:#2b5a4b}.tag.pc{color:var(--warn);border-color:#5a4b2b}
+.pill{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);padding:6px 12px;border-radius:20px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:#555}.dot.on{background:var(--acc)}.dot.mid{background:var(--warn)}.dot.err{background:var(--bad)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}.kv span:nth-child(odd){color:var(--sub)}
+button{font:inherit;background:var(--btn);color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:8px 12px;cursor:pointer}
+button:hover:not(:disabled){border-color:#3a424d}button:disabled{opacity:.35;cursor:default}
+button.pri{background:var(--acc);color:#06261c;border-color:var(--acc);font-weight:600}
+button.danger{border-color:#5a2b2b;color:var(--bad)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.big button{font-size:20px;min-width:64px;padding:10px}
+input[type=text],textarea{width:100%;background:#0e1115;color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:inherit}
+textarea{min-height:70px;resize:vertical}
+select{background:#0e1115;color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:3px 6px;font:inherit}
+label.sw{display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px}
+.note{font-size:12px;color:var(--sub);margin:10px 0 0}
+.note b{color:var(--txt);font-weight:600}
+.box{border:1px solid #5a4b2b;background:#1a1710;border-radius:10px;padding:12px;margin-top:12px}
+.list{margin-top:10px;max-height:180px;overflow:auto;font-size:12px}
+.list div{padding:6px 0;border-top:1px solid var(--line)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;user-select:none}
+.chip.on{border-color:var(--acc);color:var(--acc)}
+.log{font:12px/1.5 Consolas,ui-monospace,monospace;color:#aab4c0;max-height:220px;overflow:auto;white-space:pre-wrap}
+ol{margin:6px 0 0;padding-left:18px;font-size:13px}ol li{margin:3px 0}
+.wide{grid-column:1/-1}
+.muted{color:var(--sub)}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>K62 Minimal Control</h1>
+  <div class="pill"><span class="dot" id="dot"></span><span id="pillTxt">Desconectado</span></div>
+</header>
+
+<div class="grid">
+  <!-- Estado -->
+  <section class="card">
+    <div class="head"><h2>Reloj</h2><span class="tag pc">BLE desde el notebook</span></div>
+    <div class="kv">
+      <span>Estado</span><span id="stage">—</span>
+      <span>Sesión FitCloud</span><span id="auth">—</span>
+      <span>Batería</span><span id="battery">—</span>
+      <span>Firmware</span><span id="fw">—</span>
+      <span>Señal</span><span id="rssi">—</span>
+    </div>
+    <div class="row">
+      <button class="pri" id="bConnect">Conectar</button>
+      <button id="bDisconnect">Desconectar</button>
+      <button id="bFind">Hacer vibrar reloj</button>
+    </div>
+    <div class="box" id="bindBox" hidden>
+      <b>El reloj pide vincular este notebook.</b>
+      <p class="note" style="margin-top:6px">El K62 solo abre sesión con el usuario con el que está vinculado (FitCloudPro en tu iPhone). Opción segura: si FitCloudPro muestra tu ID de usuario, escríbelo aquí.</p>
+      <div class="row"><input type="text" id="tokenIn" placeholder="ID de usuario FitCloudPro" style="flex:1"><button id="bLogin">Probar ID</button></div>
+      <p class="note"><b>Vincular este notebook</b> requiere confirmar en el reloj y <b>probablemente desvincula FitCloudPro del iPhone</b>, que pediría volver a vincularlo; algunos relojes borran los datos al cambiar de usuario. Escribe VINCULAR para habilitarlo.</p>
+      <div class="row"><input type="text" id="bindIn" placeholder="VINCULAR" style="flex:1"><button class="danger" id="bBind">Vincular notebook</button></div>
+    </div>
+  </section>
+
+  <!-- Notificaciones -->
+  <section class="card">
+    <div class="head"><h2>Notificaciones</h2><span class="tag pc">Requiere notebook</span></div>
+    <label class="sw"><input type="checkbox" id="swForward"> Reenviar notificaciones de Windows al reloj</label>
+    <label class="sw"><input type="checkbox" id="swPaginate"> Mensajes largos en páginas de 60 caracteres (1/3, 2/3…)</label>
+    <label class="sw">Máximo de páginas (cada una vibra): <select id="selPages"><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option><option>12</option></select></label>
+    <div class="chips" id="apps"></div>
+    <p class="note">Fuente: notificaciones de Windows. Con <b>Enlace Móvil</b> vinculado al iPhone, incluyen WhatsApp. Acceso a notificaciones: <span id="access">—</span> · lector: <span id="listener">—</span></p>
+    <div class="row"><textarea id="testTxt" placeholder="Mensaje de prueba (largo, para probar la paginación)"></textarea></div>
+    <div class="row"><button id="bTest">Enviar prueba al reloj</button></div>
+    <div class="list" id="fwdList"></div>
+  </section>
+
+  <!-- Respuestas rápidas -->
+  <section class="card">
+    <div class="head"><h2>Respuestas rápidas</h2><span class="tag">Limitado por iOS</span></div>
+    <p class="note" style="margin-top:0">El reloj envía la respuesta elegida por el protocolo FitCloud (<b>evento 149/190</b>) y aquí se registra. <b>iOS no permite a accesorios ni a Windows enviar respuestas de WhatsApp</b>, así que el texto no llega a WhatsApp automáticamente.</p>
+    <div class="list" id="replyList"><div class="muted">Sin respuestas recibidas del reloj.</div></div>
+  </section>
+
+  <!-- Música -->
+  <section class="card">
+    <div class="head"><h2>Música</h2><span class="tag native">iPhone nativo + notebook</span></div>
+    <div class="kv"><span>En Windows</span><span id="np">—</span></div>
+    <div class="row big"><button data-m="previous">⏮</button><button data-m="playpause">⏯</button><button data-m="next">⏭</button></div>
+    <label class="sw"><input type="checkbox" id="swMusic"> Los botones del reloj controlan Windows y el reloj muestra el título</label>
+    <p class="note">Para controlar la música del <b>iPhone</b>, el reloj usa su enlace Bluetooth clásico, sin pasar por el notebook. Consulta la guía del iPhone.</p>
+  </section>
+
+  <!-- Llamadas -->
+  <section class="card">
+    <div class="head"><h2>Llamadas</h2><span class="tag native">iPhone nativo</span></div>
+    <p class="note" style="margin-top:0">Contestar, rechazar y colgar funcionan entre el reloj y el iPhone mediante el perfil de audio Bluetooth (el segundo «K62» de Ajustes), sin el notebook. Aquí solo se registran los botones de llamada que el reloj envía por BLE.</p>
+    <div class="row"><button id="bCall">Probar pantalla de llamada en el reloj</button><button id="bCallEnd">Cerrar</button></div>
+    <div class="list" id="callList"></div>
+  </section>
+
+  <!-- Minimalismo -->
+  <section class="card">
+    <div class="head"><h2>Reloj minimalista</h2><span class="tag">Firmware</span></div>
+    <p class="note" style="margin-top:0">Probado el 19-11-2026: el K62 acepta y guarda la configuración de páginas FitCloud, pero su interfaz (UI 7024) no la aplica. Se restauró el valor original. No hay vía validada para quitar apps internas ni cambiar el launcher. Opciones reales: elegir en el reloj una esfera simple y desactivar en FitCloudPro las notificaciones de las apps que no uses.</p>
+  </section>
+
+  <!-- Guía iPhone -->
+  <section class="card wide">
+    <div class="head"><h2>En el iPhone, sin el notebook</h2><span class="tag native">Funciones permanentes</span></div>
+    <ol>
+      <li><b>Notificaciones de WhatsApp completas:</b> Ajustes › Notificaciones › Mostrar previsualizaciones = <b>Siempre</b>; WhatsApp › Notificaciones › Mostrar vista previa = activado. Con «Si está desbloqueado», el reloj recibe solo «Notificación».</li>
+      <li>Ajustes › Bluetooth › (i) junto a <b>K62</b> › <b>Compartir notificaciones del sistema</b> = activado. En FitCloudPro, activa WhatsApp en los avisos de mensajes.</li>
+      <li><b>Llamadas y música:</b> el segundo «K62» (audio) debe aparecer como <b>Conectado</b> en Ajustes › Bluetooth. Si no aparece, actívalo desde el menú Bluetooth/llamadas del reloj y emparéjalo desde el iPhone.</li>
+      <li>La longitud máxima del texto en el reloj la fija el firmware. Para leer mensajes largos completos, usa el reenvío paginado de esta app con el notebook encendido.</li>
+    </ol>
+  </section>
+
+  <!-- Registro -->
+  <section class="card wide">
+    <div class="head"><h2>Registro</h2><span class="tag">local</span></div>
+    <div class="log" id="log"></div>
+  </section>
+</div>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const APPS={whatsapp:'WhatsApp',telegram:'Telegram',sms:'Mensajes',email:'Correo',instagram:'Instagram',messenger:'Messenger',outlook:'Outlook',gmail:'Gmail',calendar:'Calendario'};
+let S=null, forwardApps=[];
+async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>({}));if(!j.ok&&j.error)logLine('error',j.error);await refresh();return j;}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function logLine(kind,msg){const l=$('log');l.textContent+=`[${new Date().toLocaleTimeString('es-CL')}] ${kind} ${msg}\n`;l.scrollTop=l.scrollHeight;}
+function render(){
+  const w=S.watch,b=S.bridge,sess=w.session;
+  const stageTxt={desconectado:'Desconectado',buscando:'Buscando…',anunciado:'Visible (sin conexión)',conectado:'Conectado por GATT',sesion:'Sesión activa',error:'Error'}[w.stage]||w.stage;
+  $('stage').textContent=stageTxt+(w.error&&w.stage!=='sesion'?' · '+w.error:'');
+  $('auth').textContent=w.auth?({OK:'Aceptada',NEED_BIND:'Requiere vinculación'}[w.auth]||w.auth):'—';
+  $('battery').textContent=w.battery!=null?w.battery+'%'+(w.charging?' (cargando)':''):'—';
+  $('fw').textContent=w.firmware||'—';$('rssi').textContent=w.rssi!=null?w.rssi+' dBm':'—';
+  $('dot').className='dot '+(sess?'on':w.stage==='conectado'?'mid':w.stage==='error'?'err':'');
+  $('pillTxt').textContent=sess?'K62 en sesión':stageTxt;
+  $('bConnect').disabled=['conectado','sesion','buscando'].includes(w.stage);
+  $('bDisconnect').disabled=!['conectado','sesion'].includes(w.stage);
+  $('bFind').disabled=!sess;$('bTest').disabled=!sess;$('bCall').disabled=!sess;$('bCallEnd').disabled=!sess;
+  $('bindBox').hidden=w.auth!=='NEED_BIND';
+  $('swForward').checked=b.forward;$('swPaginate').checked=b.paginate;$('swMusic').checked=b.music;
+  $('access').textContent=b.notif_access;$('listener').textContent=b.listener;
+  forwardApps=b.forward_apps;
+  $('apps').innerHTML=Object.entries(APPS).map(([k,v])=>`<span class="chip ${forwardApps.includes(k)?'on':''}" data-app="${k}">${v}</span>`).join('');
+  const np=S.now_playing;$('np').textContent=np&&np.title?`${np.playing?'▶':'⏸'} ${np.title}${np.artist?' — '+np.artist:''}`:'Nada reproduciéndose';
+  $('fwdList').innerHTML=S.forwarded.map(f=>`<div><b>${esc(f.titulo)}</b> <span class="muted">${esc(f.app)} · ${f.t} · ${f.enviado?'enviado ('+f.paginas+' pág.)':esc(f.error||'no reenviado')}</span><br>${esc((f.texto||'').slice(0,160))}</div>`).join('');
+  $('replyList').innerHTML=S.replies.length?S.replies.map(r=>`<div>${r.t} · <b>${esc(r.texto)}</b> ${r.numero?'→ '+esc(r.numero):''}</div>`).join(''):'<div class="muted">Sin respuestas recibidas del reloj.</div>';
+  $('callList').innerHTML=S.events.filter(e=>e.kind==='llamada').map(e=>`<div>${e.t} · reloj: ${esc(e.accion)}</div>`).join('');
+  if(document.activeElement!==$('selPages'))$('selPages').value=String(b.max_pages);
+}
+async function refresh(){try{S=await (await fetch('/api/state')).json();render();}catch(e){}}
+$('bConnect').onclick=()=>{logLine('ui','conectando…');api('/api/connect');};
+$('bDisconnect').onclick=()=>api('/api/disconnect');
+$('bFind').onclick=()=>api('/api/find');
+$('bLogin').onclick=()=>api('/api/login',{token:$('tokenIn').value});
+$('bBind').onclick=()=>{if($('bindIn').value.trim()!=='VINCULAR'){logLine('ui','escribe VINCULAR para confirmar');return;}logLine('ui','vinculando: confirma en el reloj…');api('/api/bind',{confirm:'VINCULAR'});};
+$('swForward').onchange=e=>api('/api/bridge',{forward:e.target.checked});
+$('swPaginate').onchange=e=>api('/api/bridge',{paginate:e.target.checked});
+$('swMusic').onchange=e=>api('/api/bridge',{music:e.target.checked});
+$('apps').onclick=e=>{const k=e.target.dataset.app;if(!k)return;const s=new Set(forwardApps);s.has(k)?s.delete(k):s.add(k);api('/api/bridge',{forward_apps:[...s]});};
+document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>api('/api/media/'+b.dataset.m));
+$('bTest').onclick=()=>api('/api/test/notification',{app:'whatsapp',sender:'K62 Minimal',text:$('testTxt').value||'Prueba de K62 Minimal Control. Este mensaje es intencionadamente largo para comprobar que el reloj muestra el texto completo repartido en varias páginas numeradas, en lugar de cortarlo al llegar al límite de caracteres del firmware. Si lees esta frase final en la última página, la paginación funciona.'});
+$('bCall').onclick=()=>api('/api/test/call',{state:'entrante',name:'Prueba K62',number:'+56 9 0000 0000'});
+$('bCallEnd').onclick=()=>api('/api/test/call',{state:'terminada',name:'Prueba K62'});
+$('selPages').onchange=e=>api('/api/bridge',{max_pages:+e.target.value});
+const es=new EventSource('/api/events');es.onmessage=m=>{const e=JSON.parse(m.data);const {kind,t,...rest}=e;logLine(kind,JSON.stringify(rest));refresh();};
+refresh();setInterval(refresh,4000);
+</script>
+</body>
+</html>
