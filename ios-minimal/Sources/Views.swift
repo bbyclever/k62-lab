@@ -13,8 +13,10 @@ struct RootView: View {
             FaceView().tabItem { Label("Esfera", systemImage: "circle.hexagongrid") }
             PhotosView().tabItem { Label("Fotos", systemImage: "photo.stack") }
             AlertsView().tabItem { Label("Avisos", systemImage: "bell.badge") }
-            // Minimal: the WhatsApp tab only exists when the firmware can use it.
-            if !watch.ready || watch.supportsWhatsApp {
+            PetTabView().tabItem { Label("Mascota", systemImage: "pawprint") }
+            // Minimal: the WhatsApp tab only exists when the firmware can use it
+            // (keeps 5 tabs on the K62, so iOS never folds them into "More").
+            if watch.supportsWhatsApp {
                 WhatsAppView().tabItem { Label("WhatsApp", systemImage: "bubble.left.and.text.bubble.right") }
             }
         }

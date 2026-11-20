@@ -135,6 +135,7 @@ final class Watch: NSObject, ObservableObject {
             // The watch reconnecting also wakes the app in background: good moment
             // to rotate the photo watch face if the interval elapsed.
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { PhotoCarousel.shared.rotateIfDue() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { PetEngine.shared.refresh() }
         }
         on(FITCLOUDEVENT_BATTERYINFO_NOTIFY) { [weak self] n in
             if let b = n.object as? FitCloudBatteryInfoObject { self?.battery = Int(b.percent) }

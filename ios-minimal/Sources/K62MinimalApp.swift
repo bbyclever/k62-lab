@@ -5,6 +5,7 @@ struct K62MinimalApp: App {
     @StateObject private var watch = Watch.shared
     @StateObject private var studio = FaceStudio.shared
     @StateObject private var carousel = PhotoCarousel.shared
+    @StateObject private var pet = PetEngine.shared
     @AppStorage("k62.theme") private var theme = AppTheme.system.rawValue
     @Environment(\.scenePhase) private var phase
 
@@ -20,6 +21,7 @@ struct K62MinimalApp: App {
                 .environmentObject(watch)
                 .environmentObject(studio)
                 .environmentObject(carousel)
+                .environmentObject(pet)
                 .tint(Palette.mint)
                 .onAppear { appTheme.apply() }
                 .onChange(of: theme) { _ in appTheme.apply() }
@@ -28,6 +30,7 @@ struct K62MinimalApp: App {
             if p == .active {
                 appTheme.apply()
                 PhotoCarousel.shared.rotateIfDue()
+                PetEngine.shared.refresh()
             }
         }
     }

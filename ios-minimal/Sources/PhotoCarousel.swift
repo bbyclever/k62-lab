@@ -24,7 +24,13 @@ final class PhotoCarousel: ObservableObject {
 
     @Published private(set) var photos: [URL] = []
     @Published private(set) var displayIndex = 0
-    @Published var mode: Mode { didSet { defaults.set(mode.rawValue, forKey: "k62.carousel.mode") } }
+    @Published var mode: Mode {
+        didSet {
+            defaults.set(mode.rawValue, forKey: "k62.carousel.mode")
+            // Only one feature may own the watch face at a time.
+            if mode == .rotate && PetEngine.shared.autoFace { PetEngine.shared.autoFace = false }
+        }
+    }
     @Published var intervalHours: Int { didSet { defaults.set(intervalHours, forKey: "k62.carousel.hours") } }
     @Published private(set) var watchIndex: Int
     @Published private(set) var lastRotation: Date?
