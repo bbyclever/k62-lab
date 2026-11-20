@@ -12,17 +12,23 @@ struct K62MinimalApp: App {
         Watch.shared.start()
     }
 
+    private var appTheme: AppTheme { AppTheme(rawValue: theme) ?? .system }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(watch)
                 .environmentObject(studio)
                 .environmentObject(carousel)
-                .preferredColorScheme((AppTheme(rawValue: theme) ?? .system).scheme)
                 .tint(Palette.mint)
+                .onAppear { appTheme.apply() }
+                .onChange(of: theme) { _ in appTheme.apply() }
         }
         .onChange(of: phase) { p in
-            if p == .active { PhotoCarousel.shared.rotateIfDue() }
+            if p == .active {
+                appTheme.apply()
+                PhotoCarousel.shared.rotateIfDue()
+            }
         }
     }
 }

@@ -26,6 +26,16 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .dark: return .dark
         }
     }
+
+    /// Applies the style to every window. More reliable than preferredColorScheme(nil),
+    /// which often does not return to "system" until the app restarts.
+    func apply() {
+        let style: UIUserInterfaceStyle = self == .light ? .light : self == .dark ? .dark : .unspecified
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows { window.overrideUserInterfaceStyle = style }
+        }
+    }
 }
 
 enum Palette {
@@ -40,38 +50,42 @@ enum Palette {
 struct AmbientBackground: View {
     @EnvironmentObject var carousel: PhotoCarousel
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drift = false
 
     var body: some View {
         ZStack {
             (scheme == .dark ? Color(red: 0.04, green: 0.05, blue: 0.08) : Color(red: 0.95, green: 0.96, blue: 0.98))
-            if let img = carousel.displayImage {
+            if let img = carousel.displayBackdrop {
+                // Small image + blur: same look as blurring the full photo, far cheaper.
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
-                    .blur(radius: 50)
-                    .opacity(scheme == .dark ? 0.55 : 0.45)
+                    .blur(radius: 24)
+                    .opacity(scheme == .dark ? 0.6 : 0.5)
                     .id(carousel.displayIndex)
                     .transition(.opacity)
             } else {
-                TimelineView(.animation(minimumInterval: 1 / 20)) { tl in
-                    let t = tl.date.timeIntervalSinceReferenceDate
-                    GeometryReader { geo in
-                        let w = geo.size.width, h = geo.size.height
-                        ZStack {
-                            blob(Palette.mint, w * 0.9, x: w * (0.25 + 0.12 * sin(t / 7)), y: h * (0.2 + 0.08 * cos(t / 9)))
-                            blob(Palette.violet, w * 1.0, x: w * (0.8 + 0.1 * cos(t / 8)), y: h * (0.45 + 0.1 * sin(t / 6)))
-                            blob(Palette.rose, w * 0.8, x: w * (0.3 + 0.15 * cos(t / 10)), y: h * (0.85 + 0.06 * sin(t / 7)))
-                        }
+                GeometryReader { geo in
+                    let w = geo.size.width, h = geo.size.height
+                    ZStack {
+                        blob(Palette.mint, w * 0.9, x: w * (drift ? 0.15 : 0.35), y: h * (drift ? 0.25 : 0.15))
+                        blob(Palette.violet, w * 1.0, x: w * (drift ? 0.9 : 0.7), y: h * (drift ? 0.4 : 0.55))
+                        blob(Palette.rose, w * 0.8, x: w * (drift ? 0.4 : 0.2), y: h * (drift ? 0.9 : 0.8))
                     }
                 }
                 .blur(radius: 70)
                 .opacity(scheme == .dark ? 0.45 : 0.35)
+                // One long Core Animation transition instead of redrawing every frame.
+                .onAppear {
+                    guard !reduceMotion else { return }
+                    withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) { drift = true }
+                }
             }
             LinearGradient(colors: [.clear, (scheme == .dark ? Color.black : Color.white).opacity(0.35)],
                            startPoint: .top, endPoint: .bottom)
         }
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 1.2), value: carousel.displayIndex)
     }
 
     private func blob(_ c: Color, _ size: CGFloat, x: CGFloat, y: CGFloat) -> some View {
@@ -193,12 +207,15 @@ struct WatchPreview: View {
                 Image(uiImage: image).resizable().scaledToFill()
             }
             if showTime {
-                Text("10:42")
-                    .font(.system(size: size * 0.2, weight: .thin, design: .rounded))
-                    .foregroundStyle(amber ? Color(red: 1, green: 0.84, blue: 0.63) : .white)
-                    .shadow(color: .black.opacity(0.4), radius: 6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-                    .padding(size * 0.16)
+                TimelineView(.everyMinute) { context in
+                    Text(context.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                        .font(.system(size: size * 0.2, weight: .thin, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(amber ? Color(red: 1, green: 0.84, blue: 0.63) : .white)
+                        .shadow(color: .black.opacity(0.4), radius: 6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+                        .padding(size * 0.16)
+                }
             }
         }
         .frame(width: size, height: round ? size : size * 1.22)

@@ -24,10 +24,15 @@ final class FaceStudio: NSObject, ObservableObject {
     static let templateURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("k62-diy-template.bin")
 
-    /// Files waiting to be sent (album photos are sent one after another).
+    /// Transfer state. Only touched on the main thread (SDK callbacks hop via onMain).
     private var queue: [String] = []
     private var total = 0
     private var waitingForReconnect = false
+    private var finishHandler: ((Bool) -> Void)?
+    private var lastActivity = Date()
+    private var watchdog: Timer?
+    /// A transfer with no progress for this long is considered stuck.
+    private static let stallTimeout: TimeInterval = 240
 
     private override init() {
         super.init()
@@ -42,9 +47,35 @@ final class FaceStudio: NSObject, ObservableObject {
                                                object: nil, queue: .main) { [weak self] _ in
             guard let self, self.waitingForReconnect else { return }
             self.waitingForReconnect = false
+            self.touch()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.pushNext() }
         }
     }
+
+    private func onMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
+    }
+
+    /// Marks the start of a transfer job; refuses if another one is running.
+    private func begin(_ onFinish: ((Bool) -> Void)?) -> Bool {
+        guard !busy else { say("Ya hay una transferencia en curso"); return false }
+        busy = true
+        progress = 0
+        finishHandler = onFinish
+        touch()
+        watchdog?.invalidate()
+        watchdog = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            guard let self, self.busy else { return }
+            if Date().timeIntervalSince(self.lastActivity) > Self.stallTimeout {
+                self.fail("La transferencia no avanza; cancelada. Acerca el reloj e inténtalo de nuevo.")
+                FitCloudDFUKit.abortIfNeeded()
+                if FitCloudKit.isCurrentDFUMode() { FitCloudKit.exitDFUMode { _, _ in } }
+            }
+        }
+        return true
+    }
+
+    private func touch() { lastActivity = Date() }
 
     // MARK: Photo album (native watch feature)
 
@@ -55,7 +86,7 @@ final class FaceStudio: NSObject, ObservableObject {
     func sendAlbum(_ images: [UIImage]) {
         guard !images.isEmpty else { say("Añade fotos primero"); return }
         guard albumSupported else { say("Este firmware no declara álbum de fotos"); return }
-        DispatchQueue.main.async { self.busy = true; self.progress = 0 }
+        guard begin(nil) else { return }
         say("Preparando \(images.count) fotos…")
         FitCloudKit.getPhotoPushParams { [weak self] ok, params, err in
             guard let self else { return }
@@ -77,9 +108,10 @@ final class FaceStudio: NSObject, ObservableObject {
 
     private func makePhotoBins(_ images: [UIImage], params: DevicePhotoCreateParams, done: [String], index: Int) {
         guard index < images.count else {
-            if done.isEmpty { fail("No se pudo convertir ninguna foto") } else { push(done) }
+            if done.isEmpty { fail("No se pudo convertir ninguna foto") } else { onMain { self.push(done) } }
             return
         }
+        onMain { self.touch() }
         say("Convirtiendo foto \(index + 1) de \(images.count)…")
         FitCloudWFKit.createPhotoBin(with: images[index], parameters: params, logging: nil) { [weak self] ok, path, err in
             guard let self else { return }
@@ -141,8 +173,7 @@ final class FaceStudio: NSObject, ObservableObject {
     func fetchTemplate(ui: FitCloudWatchfaceUIInfo) {
         guard let fw = FitCloudKit.allConfig()?.firmware else { say("Reloj no listo"); return }
         let newGUI = fw.isNewGUIArchitecture
-        let hw = UInt64(fw.hardwareSupported.rawValue)
-        let platform = hw & (1 << 26) != 0 ? "gui-8773" : hw & (1 << 27) != 0 ? "gui-5681" : "gui"
+        let platform = Watch.platform
         let path = newGUI ? "customgui" : "custom"
         var req = URLRequest(url: URL(string: "http://fitcloud.hetangsmart.com/public/dial/\(path)")!)
         req.httpMethod = "POST"
@@ -165,9 +196,14 @@ final class FaceStudio: NSObject, ObservableObject {
                 self.say("Sin plantilla para este reloj (código \(code): \(json["errorMsg"] as? String ?? "-")). Importa un .bin desde Archivos.")
                 return
             }
-            URLSession.shared.downloadTask(with: url) { tmp, _, err in
+            let expected = (item?["binSize"] as? Int) ?? (item?["binSize"] as? NSNumber)?.intValue
+            URLSession.shared.downloadTask(with: url) { tmp, response, err in
                 guard let tmp else { self.say("Descarga fallida: \(err?.localizedDescription ?? "-")"); return }
-                self.store(templateAt: tmp)
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    self.say("Descarga rechazada (HTTP \(http.statusCode)); no se guarda nada")
+                    return
+                }
+                self.store(templateAt: tmp, expectedSize: expected)
             }.resume()
         }.resume()
     }
@@ -175,16 +211,36 @@ final class FaceStudio: NSObject, ObservableObject {
     func importTemplate(from url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        store(templateAt: url)
+        store(templateAt: url, expectedSize: nil)
     }
 
-    private func store(templateAt src: URL) {
-        let dst = Self.templateURL
-        try? FileManager.default.removeItem(at: dst)
+    func removeTemplate() {
+        try? FileManager.default.removeItem(at: Self.templateURL)
+        templateReady = false
+        say("Plantilla eliminada")
+    }
+
+    /// Validates before keeping a template: it will be written into the watch,
+    /// so an HTML error page or a truncated download must never be stored.
+    private func store(templateAt src: URL, expectedSize: Int?) {
+        guard let data = try? Data(contentsOf: src) else { say("No se pudo leer la plantilla"); return }
+        if data.count < 1024 {
+            say("Archivo demasiado pequeño (\(data.count) bytes); no parece una plantilla")
+            return
+        }
+        if let head = String(data: data.prefix(64), encoding: .utf8)?.lowercased(),
+           head.contains("<html") || head.contains("<!doctype") || head.hasPrefix("{") {
+            say("El archivo es una página o JSON, no una plantilla binaria; descartado")
+            return
+        }
+        if let expectedSize, expectedSize > 0, expectedSize != data.count {
+            say("Tamaño inesperado (\(data.count) de \(expectedSize) bytes); descartado")
+            return
+        }
         do {
-            try FileManager.default.copyItem(at: src, to: dst)
-            DispatchQueue.main.async { self.templateReady = true }
-            say("Plantilla guardada (\((try? Data(contentsOf: dst).count) ?? 0) bytes)")
+            try data.write(to: Self.templateURL, options: .atomic)
+            onMain { self.templateReady = true }
+            say("Plantilla guardada (\(data.count) bytes)")
         } catch {
             say("No se pudo guardar la plantilla: \(error.localizedDescription)")
         }
@@ -196,11 +252,13 @@ final class FaceStudio: NSObject, ObservableObject {
 
     // MARK: Create + install
 
-    func install(bk: UIImage, ui: FitCloudWatchfaceUIInfo?, position: Position, color: UIColor) {
-        guard templateReady else { say("Falta la plantilla de esfera"); return }
-        guard let fw = FitCloudKit.allConfig()?.firmware else { say("Reloj no listo"); return }
+    /// - Parameter onFinish: called on the main thread with the final result.
+    func install(bk: UIImage, ui: FitCloudWatchfaceUIInfo?, position: Position, color: UIColor,
+                 onFinish: ((Bool) -> Void)? = nil) {
+        guard templateReady else { say("Falta la plantilla de esfera"); onFinish?(false); return }
+        guard let fw = FitCloudKit.allConfig()?.firmware else { say("Reloj no listo"); onFinish?(false); return }
+        guard begin(onFinish) else { onFinish?(false); return }
         let preview = Self.preview(bk: bk, ui: ui, position: position, color: color)
-        DispatchQueue.main.async { self.busy = true; self.progress = 0 }
         FitCloudWFKit.create(withTemplateBin: Self.templateURL.path,
                              isNextGUI: fw.isNewGUIArchitecture,
                              rewriteNextGUIWatchfaceNo: nil,
@@ -210,6 +268,7 @@ final class FaceStudio: NSObject, ObservableObject {
                              dtPosition: position.sdk,
                              dtStyle: nil,
                              dtColor: color) { [weak self] p, tips in
+            self?.onMain { self?.touch() }
             self?.say("Creando esfera \(Int(p * 100))% \(tips ?? "")")
         } logging: { _, _ in
         } completion: { [weak self] ok, binPath, _, _, err in
@@ -219,11 +278,11 @@ final class FaceStudio: NSObject, ObservableObject {
                 return
             }
             self.say("Esfera creada; enviando al reloj…")
-            self.push([binPath])
+            self.onMain { self.push([binPath]) }
         }
     }
 
-    // MARK: Transfer queue
+    // MARK: Transfer queue (main thread only)
 
     private func push(_ paths: [String]) {
         queue = paths
@@ -232,21 +291,30 @@ final class FaceStudio: NSObject, ObservableObject {
     }
 
     private func pushNext() {
+        guard busy else { return }  // cancelled meanwhile
         guard !queue.isEmpty else {
             done(total > 1 ? "\(total) archivos enviados al reloj" : "Instalado en el reloj")
             return
         }
-        guard let fw = FitCloudKit.allConfig()?.firmware else { fail("Reloj no listo"); return }
+        guard let fw = FitCloudKit.allConfig()?.firmware, Watch.shared.connected else {
+            fail("El reloj no está conectado")
+            return
+        }
         let path = queue.removeFirst()
+        progress = 0
+        touch()
         if total > 1 { say("Enviando \(total - queue.count) de \(total)…") }
         if fw.withNewOTA { pushNewOTA(path) } else { pushDFU(path) }
     }
 
     private func itemFinished() {
-        if queue.isEmpty {
-            pushNext()
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.pushNext() }
+        onMain {
+            self.touch()
+            if self.queue.isEmpty {
+                self.pushNext()
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.pushNext() }
+            }
         }
     }
 
@@ -254,7 +322,7 @@ final class FaceStudio: NSObject, ObservableObject {
         FitCloudKit.sendNewOTA(path) { [weak self] started, err in
             if !started { self?.fail("OTA no inició: \(err?.localizedDescription ?? "-")") }
         } progress: { [weak self] p in
-            DispatchQueue.main.async { self?.progress = Double(p) }
+            self?.onMain { self?.touch(); self?.progress = Double(p) }
         } completion: { [weak self] ok, _, err in
             if ok { self?.itemFinished() }
             else { self?.fail("OTA falló: \(err?.localizedDescription ?? "-")") }
@@ -275,42 +343,63 @@ final class FaceStudio: NSObject, ObservableObject {
     // MARK: Status
 
     private func say(_ s: String) {
-        DispatchQueue.main.async {
+        onMain {
             self.message = s
             Watch.shared.note(s)
         }
     }
 
     private func fail(_ s: String) {
-        say(s)
-        queue = []
-        waitingForReconnect = false
-        DispatchQueue.main.async { self.busy = false }
+        onMain {
+            guard self.busy || !self.queue.isEmpty else { self.say(s); return }
+            self.finish(false, s)
+        }
     }
 
     private func done(_ s: String) {
-        say(s)
-        DispatchQueue.main.async {
-            self.busy = false
+        onMain {
             self.progress = 1
+            self.finish(true, s)
             Watch.shared.loadAll()
         }
+    }
+
+    private func finish(_ ok: Bool, _ s: String) {
+        say(s)
+        queue = []
+        waitingForReconnect = false
+        busy = false
+        watchdog?.invalidate()
+        watchdog = nil
+        let handler = finishHandler
+        finishHandler = nil
+        handler?(ok)
     }
 }
 
 extension FaceStudio: FitCloudDFUDelegate {
-    func onStartDFUSuccess() { say("Transferencia DFU iniciada") }
+    func onStartDFUSuccess() {
+        onMain { self.touch() }
+        say("Transferencia DFU iniciada")
+    }
     func onStartDFUFailureWithError(_ error: Error) { fail("DFU no inició: \(error.localizedDescription)") }
     func onDFUProgress(_ progress: CGFloat, imageIndex index: Int, total: Int) {
-        DispatchQueue.main.async { self.progress = Double(progress) / 100 }
+        onMain {
+            self.touch()
+            self.progress = Double(progress) / 100
+        }
     }
     func onAbortWithError(_ error: Error) { fail("DFU abortado: \(error.localizedDescription)") }
     func onDFUFinish(withSpeed speed: CGFloat) {
-        if queue.isEmpty {
-            done(total > 1 ? "\(total) archivos enviados; el reloj reinicia su interfaz" : "Instalado; el reloj reinicia su interfaz")
-        } else {
-            say("Archivo enviado; esperando a que el reloj vuelva a conectar…")
-            waitingForReconnect = true
+        onMain {
+            self.touch()
+            if self.queue.isEmpty {
+                self.done(self.total > 1 ? "\(self.total) archivos enviados; el reloj reinicia su interfaz"
+                                         : "Instalado; el reloj reinicia su interfaz")
+            } else {
+                self.say("Archivo enviado; esperando a que el reloj vuelva a conectar…")
+                self.waitingForReconnect = true
+            }
         }
     }
     func onDFULogMessage(_ message: String, level: FCDFUKLogLevel) {}

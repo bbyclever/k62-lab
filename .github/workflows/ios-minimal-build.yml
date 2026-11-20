@@ -86,8 +86,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete ios-latest --yes --cleanup-tag || true
-          gh release create ios-latest K62Minimal-unsigned.ipa \
-            --target "${{ github.sha }}" --prerelease \
-            --title "K62 Minimal iOS (sin firmar)" \
-            --notes "IPA sin firmar compilado desde ${{ github.sha }}. Fírmalo con tu Apple ID (SideStore/Sideloadly) antes de instalar."
+          NOTES="IPA sin firmar compilado desde ${{ github.sha }}. Fírmalo con tu Apple ID (SideStore/Sideloadly) antes de instalar."
+          if gh release view ios-latest >/dev/null 2>&1; then
+            # Replace the asset in place: the download link never 404s.
+            gh release upload ios-latest K62Minimal-unsigned.ipa --clobber
+            gh release edit ios-latest --notes "$NOTES"
+          else
+            gh release create ios-latest K62Minimal-unsigned.ipa --target "${{ github.sha }}" --prerelease \
+              --title "K62 Minimal iOS (sin firmar)" --notes "$NOTES"
+          fi

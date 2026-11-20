@@ -16,10 +16,10 @@ final class Watch: NSObject, ObservableObject {
     }
 
     struct Capability: Identifiable {
-        let id = UUID()
         let name: String
         let value: String
         let good: Bool
+        var id: String { name }
     }
 
     @Published var status = "Iniciando…"
@@ -30,8 +30,36 @@ final class Watch: NSObject, ObservableObject {
     @Published var ready = false
     @Published var battery: Int?
     @Published var firmware = "—"
-    @Published var capabilities: [Capability] = []
+    @Published private var firmwareCapabilities: [Capability] = []
     @Published var faceUI: FitCloudWatchfaceUIInfo?
+
+    /// Firmware flags + screen info; rebuilt on every refresh (never appended twice).
+    var capabilities: [Capability] {
+        guard let ui = faceUI else { return firmwareCapabilities }
+        let r = ui.screenResolution()
+        let tool: String? = ui.toolVersion
+        let slots: [FitCloudWatchfaceSlot]? = ui.slots
+        return firmwareCapabilities + [
+            Capability(name: "Pantalla", value: "\(Int(r.width))×\(Int(r.height)) \(ui.isRound() ? "redonda" : "rectangular")", good: true),
+            Capability(name: "Herramienta de esferas", value: tool ?? "?", good: true),
+            Capability(name: "Ranuras de esfera", value: "\(slots?.count ?? 0)", good: true),
+        ]
+    }
+
+    /// FitCloud watch-face server platform for this firmware.
+    static var platform: String {
+        let hw = UInt64(FitCloudKit.allConfig()?.firmware?.hardwareSupported.rawValue ?? 0)
+        if hw & (1 << 26) != 0 { return "gui-8773" }   // FITCLOUDHARDWARE_8773
+        if hw & (1 << 27) != 0 { return "gui-5681" }   // FITCLOUDHARDWARE_568X
+        return "gui"
+    }
+
+    private var scanGeneration = 0
+    private static let clock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
     @Published var enabledApps: Set<FitCloudNotificationApp> = []
     @Published var supportsWhatsApp = false
     @Published var log: [String] = []
@@ -119,11 +147,16 @@ final class Watch: NSObject, ObservableObject {
         devices = []
         systemConnected = [:]
         scanning = true
+        scanGeneration += 1
+        let generation = scanGeneration
         recoverSystemConnected()
         FitCloudKit.startScan()
         set("Buscando relojes…")
+        // Only the most recent scan may stop itself.
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            if self?.scanning == true { self?.stopScan() }
+            guard let self, self.scanning, self.scanGeneration == generation else { return }
+            self.stopScan()
+            if self.devices.isEmpty { self.set("No se encontró el K62. Acércalo y vuelve a buscar.") }
         }
     }
 
@@ -189,15 +222,17 @@ final class Watch: NSObject, ObservableObject {
             let version: String? = fw.firmwareVersion
             firmware = version ?? "—"
             supportsWhatsApp = fw.supportsWhatsApp
-            let hw = UInt64(fw.hardwareSupported.rawValue)
-            let platform = hw & (1 << 26) != 0 ? "gui-8773" : hw & (1 << 27) != 0 ? "gui-5681" : "gui"
-            capabilities = [
-                Capability(name: "WhatsApp (leer y responder)", value: fw.supportsWhatsApp ? "Sí" : "No", good: fw.supportsWhatsApp),
-                Capability(name: "Esfera DIY + subida", value: yes(FitCloudKit.isDeviceSupport(.WATCHFACEDIYANDOTA)), good: FitCloudKit.isDeviceSupport(.WATCHFACEDIYANDOTA)),
-                Capability(name: "Subir esferas", value: yes(FitCloudKit.isDeviceSupport(.WATCHFACEOTA)), good: FitCloudKit.isDeviceSupport(.WATCHFACEOTA)),
+            let diy = FitCloudKit.isDeviceSupport(.WATCHFACEDIYANDOTA)
+            let faceOTA = FitCloudKit.isDeviceSupport(.WATCHFACEOTA)
+            let album = fw.allowPhotoPush || FitCloudKit.isDeviceSupport(.PHOTOALBUMOTA)
+            firmwareCapabilities = [
+                Capability(name: "Esfera con foto propia", value: yes(diy), good: diy),
+                Capability(name: "Álbum de fotos", value: yes(album), good: album),
+                Capability(name: "Subir esferas", value: yes(faceOTA), good: faceOTA),
+                Capability(name: "WhatsApp (leer y responder)", value: yes(fw.supportsWhatsApp), good: fw.supportsWhatsApp),
                 Capability(name: "Arquitectura GUI nueva", value: yes(fw.isNewGUIArchitecture), good: true),
                 Capability(name: "OTA nuevo", value: yes(fw.withNewOTA), good: true),
-                Capability(name: "Plataforma", value: platform, good: true),
+                Capability(name: "Plataforma", value: Self.platform, good: true),
             ]
             note("Firmware \(firmware) · WhatsApp=\(fw.supportsWhatsApp)")
         }
@@ -209,12 +244,6 @@ final class Watch: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 guard ok, let ui else { self?.note("Info de esfera no disponible: \(err?.localizedDescription ?? "-")"); return }
                 self?.faceUI = ui
-                let r = ui.screenResolution()
-                self?.capabilities.append(Capability(name: "Pantalla", value: "\(Int(r.width))×\(Int(r.height)) \(ui.isRound() ? "redonda" : "rectangular") (lcd \(ui.lcd))", good: true))
-                let tool: String? = ui.toolVersion
-                let slots: [FitCloudWatchfaceSlot]? = ui.slots
-                self?.capabilities.append(Capability(name: "Herramienta de esferas", value: tool ?? "?", good: true))
-                self?.capabilities.append(Capability(name: "Ranuras de esfera", value: "\(slots?.count ?? 0)", good: true))
             }
         }
     }
@@ -261,9 +290,7 @@ final class Watch: NSObject, ObservableObject {
     }
 
     func note(_ s: String) {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss"
-        log.insert("\(f.string(from: Date())) \(s)", at: 0)
+        log.insert("\(Self.clock.string(from: Date())) \(s)", at: 0)
         if log.count > 200 { log.removeLast() }
     }
 }

@@ -5,13 +5,18 @@ import FitCloudKit
 import FitCloudWhatsApp
 
 struct RootView: View {
+    @EnvironmentObject var watch: Watch
+
     var body: some View {
         TabView {
             HomeView().tabItem { Label("Reloj", systemImage: "applewatch") }
             FaceView().tabItem { Label("Esfera", systemImage: "circle.hexagongrid") }
             PhotosView().tabItem { Label("Fotos", systemImage: "photo.stack") }
             AlertsView().tabItem { Label("Avisos", systemImage: "bell.badge") }
-            WhatsAppView().tabItem { Label("WhatsApp", systemImage: "bubble.left.and.text.bubble.right") }
+            // Minimal: the WhatsApp tab only exists when the firmware can use it.
+            if !watch.ready || watch.supportsWhatsApp {
+                WhatsAppView().tabItem { Label("WhatsApp", systemImage: "bubble.left.and.text.bubble.right") }
+            }
         }
     }
 }
@@ -216,7 +221,13 @@ struct FaceView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(text: "Instalar", icon: "square.and.arrow.down.on.square")
                 if studio.templateReady {
-                    Label("Plantilla del reloj lista", systemImage: "checkmark.seal.fill").foregroundStyle(Palette.mint)
+                    HStack {
+                        Label("Plantilla del reloj lista", systemImage: "checkmark.seal.fill").foregroundStyle(Palette.mint)
+                        Spacer()
+                        Button("Cambiar") { studio.removeTemplate() }
+                            .font(.caption.weight(.semibold))
+                            .disabled(studio.busy)
+                    }
                 } else {
                     HStack(spacing: 10) {
                         Button("Obtener plantilla") { if let ui = watch.faceUI { studio.fetchTemplate(ui: ui) } }
@@ -296,17 +307,21 @@ struct PhotosView: View {
     @AppStorage("k62.face.position") private var positionRaw = 0
     @AppStorage("k62.face.amber") private var amber = false
     @State private var items: [PhotosPickerItem] = []
+    @State private var pickNote: String?
 
     private let intervals = [1, 3, 6, 12, 24]
 
     var body: some View {
         Page(title: "Fotos") {
-            WatchPreview(image: carousel.displayImage, round: watch.faceUI?.isRound() ?? true,
-                         position: FaceStudio.Position(rawValue: positionRaw) ?? .top, amber: amber, size: 230)
-                .id(carousel.displayIndex)
-                .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                .animation(.easeInOut(duration: 0.8), value: carousel.displayIndex)
-                .padding(.vertical, 12)
+            // The carousel timer changes displayIndex inside withAnimation, so the
+            // new identity cross-fades in.
+            ZStack {
+                WatchPreview(image: carousel.displayImage, round: watch.faceUI?.isRound() ?? true,
+                             position: FaceStudio.Position(rawValue: positionRaw) ?? .top, amber: amber, size: 230)
+                    .id(carousel.displayIndex)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+            .padding(.vertical, 12)
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -335,11 +350,17 @@ struct PhotosView: View {
                         }
                     }
                 }
-                PhotosPicker(selection: $items, maxSelectionCount: 12, matching: .images) {
+                PhotosPicker(selection: $items,
+                             maxSelectionCount: max(1, PhotoCarousel.maxPhotos - carousel.photos.count),
+                             matching: .images) {
                     Label("Añadir fotos", systemImage: "plus")
                 }
                 .buttonStyle(GlassButtonStyle(prominent: carousel.photos.isEmpty))
-                Text("En la app las fotos van cambiando solas cada pocos segundos y forman el fondo.")
+                .disabled(carousel.photos.count >= PhotoCarousel.maxPhotos)
+                if let pickNote {
+                    Text(pickNote).font(.caption).foregroundStyle(.orange)
+                }
+                Text("En la app las fotos van cambiando solas cada pocos segundos y forman el fondo. Máximo \(PhotoCarousel.maxPhotos).")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .glassCard()
@@ -393,7 +414,13 @@ struct PhotosView: View {
                     }
                 }
                 await MainActor.run {
-                    withAnimation { carousel.add(imgs) }
+                    var skipped = 0
+                    withAnimation { skipped = carousel.add(imgs) }
+                    let failed = picked.count - imgs.count
+                    var notes: [String] = []
+                    if skipped > 0 { notes.append("\(skipped) no se añadieron: límite de \(PhotoCarousel.maxPhotos) fotos") }
+                    if failed > 0 { notes.append("\(failed) no se pudieron leer") }
+                    pickNote = notes.isEmpty ? nil : notes.joined(separator: " · ")
                     items = []
                 }
             }
@@ -450,11 +477,21 @@ struct AlertsView: View {
 
     /// How an app reaches the watch: its own category (own icon), through
     /// "Otras apps" (generic icon), or not at all on this firmware.
-    private enum Route { case own, viaOther, unavailable }
+    private enum Route { case unknown, own, viaOther, unavailable }
 
     private func route(_ item: NotifApp) -> Route {
-        if !watch.ready || watch.supports(item.app) { return .own }
+        guard watch.ready else { return .unknown }
+        if watch.supports(item.app) { return .own }
         return watch.supports(.other) ? .viaOther : .unavailable
+    }
+
+    private func detail(_ r: Route) -> String {
+        switch r {
+        case .unknown: return "Conecta el reloj para ver cómo llega"
+        case .own: return "Icono propio en el reloj"
+        case .viaOther: return "Llega como «Otras apps» (icono genérico)"
+        case .unavailable: return "Este firmware no lo muestra"
+        }
     }
 
     private func key(_ item: NotifApp) -> FitCloudNotificationApp {
@@ -475,6 +512,7 @@ struct AlertsView: View {
                     watch.setApps(s)
                 }
                 .buttonStyle(GlassButtonStyle(prominent: true))
+                .disabled(!watch.ready)
             }
             .glassCard()
 
@@ -486,9 +524,7 @@ struct AlertsView: View {
                             .saturation(r == .unavailable ? 0 : 1)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.name).font(.subheadline.weight(.medium))
-                            Text(r == .own ? "Icono propio en el reloj"
-                                 : r == .viaOther ? "Llega como «Otras apps» (icono genérico)"
-                                 : "Este firmware no lo muestra")
+                            Text(detail(r))
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -500,7 +536,7 @@ struct AlertsView: View {
                             }))
                             .labelsHidden()
                             .tint(item.colors.first ?? Palette.mint)
-                            .disabled(r == .unavailable)
+                            .disabled(r == .unavailable || r == .unknown)
                     }
                     .padding(.vertical, 9)
                     if item.id != NotifApp.all.last?.id {
@@ -518,7 +554,6 @@ struct AlertsView: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .padding(.horizontal, 6)
         }
-        .disabled(!watch.ready)
         .onAppear { selection = watch.enabledApps }
         .onChange(of: watch.enabledApps) { selection = $0 }
     }
