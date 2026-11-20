@@ -221,7 +221,7 @@ final class PetEngine: ObservableObject {
         // chosen watch font and colour, but no glass panel and time on top.
         var style = FaceStyle.saved
         style.position = .top
-        style.glass = false
+        style.backdrop = .none
         FaceStudio.shared.install(bk: img, ui: Watch.shared.faceUI, style: style, compose: false) { [weak self] ok in
             guard let self else { return }
             self.installing = false

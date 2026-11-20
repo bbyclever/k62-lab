@@ -65,7 +65,7 @@ struct Page<Content: View>: View {
 struct HomeView: View {
     @EnvironmentObject var watch: Watch
     @EnvironmentObject var carousel: PhotoCarousel
-    @AppStorage("k62.face.design") private var design = "2-orbita"
+    @AppStorage("k62.face.design") private var design = "aurora"
 
     var body: some View {
         Page(title: "K62") {
@@ -174,11 +174,11 @@ struct HomeView: View {
 struct FaceView: View {
     @EnvironmentObject var watch: Watch
     @EnvironmentObject var studio: FaceStudio
-    @AppStorage("k62.face.design") private var design = "2-orbita"
+    @AppStorage("k62.face.design") private var design = "aurora"
     @AppStorage("k62.face.position") private var positionRaw = FaceStudio.Position.bottom.rawValue
-    @AppStorage("k62.face.timeStyle") private var timeStyle = -1
+    @AppStorage("k62.face.timeStyle") private var timeStyle = 0
     @AppStorage("k62.face.colorHex") private var colorHex = "FFFFFF"
-    @AppStorage("k62.face.glass") private var glass = true
+    @AppStorage("k62.face.backdrop") private var backdropRaw = FaceStyle.Backdrop.shadow.rawValue
     @State private var custom: UIImage?
     @State private var pick: PhotosPickerItem?
     @State private var importing = false
@@ -187,7 +187,10 @@ struct FaceView: View {
     private static let swatches = ["FFFFFF", "FFD6A0", "5EE0B5", "FF7A9C", "7CC4FF", "1C1C1E"]
 
     private var position: FaceStudio.Position { FaceStudio.Position(rawValue: positionRaw) ?? .bottom }
-    private var style: FaceStyle { FaceStyle(position: position, timeStyle: timeStyle, colorHex: colorHex, glass: glass) }
+    private var style: FaceStyle {
+        FaceStyle(position: position, timeStyle: timeStyle, colorHex: colorHex,
+                  backdrop: FaceStyle.Backdrop(rawValue: backdropRaw) ?? .shadow)
+    }
     private var background: UIImage? { custom ?? FaceStudio.background(design, for: watch.faceUI) }
     /// Exactly the background that will be written to the watch.
     private var composed: UIImage? { background.map { FaceStudio.compose($0, ui: watch.faceUI, style: style) } }
@@ -211,12 +214,17 @@ struct FaceView: View {
                             if let img = FaceStudio.background(d, for: watch.faceUI) {
                                 let selected = design == d && custom == nil
                                 let shape = RoundedRectangle(cornerRadius: round ? 32 : 12, style: .continuous)
-                                Image(uiImage: img).resizable().scaledToFill()
-                                    .frame(width: 54, height: round ? 54 : 64)
-                                    .clipShape(shape)
-                                    .overlay(shape.strokeBorder(selected ? Palette.mint : Color.white.opacity(0.25),
-                                                                lineWidth: selected ? 3 : 1))
-                                    .onTapGesture { withAnimation(.spring()) { design = d; custom = nil } }
+                                VStack(spacing: 6) {
+                                    Image(uiImage: img).resizable().scaledToFill()
+                                        .frame(width: 56, height: round ? 56 : 66)
+                                        .clipShape(shape)
+                                        .overlay(shape.strokeBorder(selected ? Palette.mint : Color.white.opacity(0.2),
+                                                                    lineWidth: selected ? 3 : 1))
+                                    Text(FaceStudio.designNames[d] ?? d)
+                                        .font(.caption2)
+                                        .foregroundStyle(selected ? Color.primary : Color.secondary)
+                                }
+                                .onTapGesture { withAnimation(.spring()) { design = d; custom = nil } }
                             }
                         }
                     }
@@ -226,10 +234,13 @@ struct FaceView: View {
                     Label(custom == nil ? "Usar una foto propia" : "Cambiar foto", systemImage: "photo.on.rectangle")
                 }
                 .buttonStyle(GlassButtonStyle())
-                Toggle(isOn: $glass) {
-                    Label("Panel de cristal detrás de la hora", systemImage: "rectangle.on.rectangle")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Detrás de la hora").font(.subheadline.weight(.medium))
+                    Picker("Detrás de la hora", selection: $backdropRaw) {
+                        ForEach(FaceStyle.Backdrop.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .tint(Palette.mint)
             }
             .glassCard()
 
@@ -246,7 +257,7 @@ struct FaceView: View {
                         ForEach(0..<6, id: \.self) { Text("\($0 + 1)").tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    Text("Son los estilos de hora y fecha que trae el firmware del K62 (más gruesos o más finos). La vista previa es aproximada: prueba cada número en el reloj.")
+                    Text("Estilos de hora y fecha del firmware del K62. El 1 está comprobado (números gruesos con fecha); la vista previa de los demás es aproximada.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 10) {
@@ -352,14 +363,15 @@ struct PhotosView: View {
     @EnvironmentObject var carousel: PhotoCarousel
     @AppStorage("k62.face.position") private var positionRaw = FaceStudio.Position.bottom.rawValue
     @AppStorage("k62.face.colorHex") private var colorHex = "FFFFFF"
-    @AppStorage("k62.face.glass") private var glass = true
-    @AppStorage("k62.face.timeStyle") private var timeStyle = -1
+    @AppStorage("k62.face.backdrop") private var backdropRaw = FaceStyle.Backdrop.shadow.rawValue
+    @AppStorage("k62.face.timeStyle") private var timeStyle = 0
     @State private var items: [PhotosPickerItem] = []
     @State private var pickNote: String?
 
     private var style: FaceStyle {
         FaceStyle(position: FaceStudio.Position(rawValue: positionRaw) ?? .bottom,
-                  timeStyle: timeStyle, colorHex: colorHex, glass: glass)
+                  timeStyle: timeStyle, colorHex: colorHex,
+                  backdrop: FaceStyle.Backdrop(rawValue: backdropRaw) ?? .shadow)
     }
 
     private let intervals = [1, 3, 6, 12, 24]
