@@ -403,48 +403,116 @@ struct PhotosView: View {
 
 // MARK: - Avisos
 
+struct NotifApp: Identifiable {
+    let app: FitCloudNotificationApp
+    let name: String
+    let symbol: String
+    let colors: [Color]
+    var id: String { name }
+
+    static func rgb(_ hex: UInt32) -> Color {
+        Color(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
+    }
+
+    static let all: [NotifApp] = [
+        NotifApp(app: .call, name: "Llamadas", symbol: "phone.fill", colors: [rgb(0x34C759), rgb(0x28A745)]),
+        NotifApp(app: .SMS, name: "Mensajes", symbol: "message.fill", colors: [rgb(0x5BE86F), rgb(0x30C04A)]),
+        NotifApp(app: .whatsApp, name: "WhatsApp", symbol: "phone.bubble.left.fill", colors: [rgb(0x25D366), rgb(0x128C7E)]),
+        NotifApp(app: .whatsAppBusiness, name: "WhatsApp Business", symbol: "briefcase.fill", colors: [rgb(0x128C7E), rgb(0x075E54)]),
+        NotifApp(app: .telegram, name: "Telegram", symbol: "paperplane.fill", colors: [rgb(0x37BBFE), rgb(0x1E96C8)]),
+        NotifApp(app: .teams, name: "Teams", symbol: "person.2.fill", colors: [rgb(0x7B83EB), rgb(0x4B53BC)]),
+        NotifApp(app: .outlook, name: "Outlook", symbol: "envelope.open.fill", colors: [rgb(0x1E90FF), rgb(0x0A64D6)]),
+        NotifApp(app: .gmail, name: "Gmail", symbol: "envelope.fill", colors: [rgb(0xEA4335), rgb(0xC5221F)]),
+        NotifApp(app: .mail, name: "Correo", symbol: "envelope.fill", colors: [rgb(0x4FA3FF), rgb(0x1A73E8)]),
+        NotifApp(app: .calendar, name: "Calendario", symbol: "calendar", colors: [rgb(0xFF5A5F), rgb(0xE0342F)]),
+        NotifApp(app: .instagram, name: "Instagram", symbol: "camera.fill", colors: [rgb(0xF58529), rgb(0xDD2A7B), rgb(0x8134AF)]),
+        NotifApp(app: .messenger, name: "Messenger", symbol: "bolt.fill", colors: [rgb(0x00B2FF), rgb(0xA033FF)]),
+        NotifApp(app: .facebook, name: "Facebook", symbol: "f.cursive", colors: [rgb(0x3B8BFF), rgb(0x1877F2)]),
+        NotifApp(app: .other, name: "Otras apps", symbol: "square.grid.2x2.fill", colors: [rgb(0x9AA0A6), rgb(0x5F6368)]),
+    ]
+}
+
+struct AppIcon: View {
+    let item: NotifApp
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(LinearGradient(colors: item.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 36, height: 36)
+            .overlay(Image(systemName: item.symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+            .shadow(color: (item.colors.last ?? .black).opacity(0.35), radius: 6, y: 3)
+    }
+}
+
 struct AlertsView: View {
     @EnvironmentObject var watch: Watch
     @State private var selection: Set<FitCloudNotificationApp> = []
 
-    private let apps: [(FitCloudNotificationApp, String, String)] = [
-        (.call, "Llamadas", "phone.fill"), (.SMS, "Mensajes", "message.fill"),
-        (.whatsApp, "WhatsApp", "bubble.left.fill"), (.whatsAppBusiness, "WhatsApp Business", "briefcase.fill"),
-        (.telegram, "Telegram", "paperplane.fill"), (.mail, "Correo", "envelope.fill"),
-        (.gmail, "Gmail", "envelope.badge.fill"), (.outlook, "Outlook", "tray.fill"),
-        (.calendar, "Calendario", "calendar"), (.teams, "Teams", "person.3.fill"),
-        (.instagram, "Instagram", "camera.fill"), (.messenger, "Messenger", "bolt.horizontal.circle.fill"),
-        (.facebook, "Facebook", "f.circle.fill"), (.other, "Otras apps", "ellipsis.circle.fill"),
-    ]
+    /// How an app reaches the watch: its own category (own icon), through
+    /// "Otras apps" (generic icon), or not at all on this firmware.
+    private enum Route { case own, viaOther, unavailable }
+
+    private func route(_ item: NotifApp) -> Route {
+        if !watch.ready || watch.supports(item.app) { return .own }
+        return watch.supports(.other) ? .viaOther : .unavailable
+    }
+
+    private func key(_ item: NotifApp) -> FitCloudNotificationApp {
+        route(item) == .viaOther ? .other : item.app
+    }
 
     var body: some View {
         Page(title: "Avisos") {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(text: "Modo minimalista", icon: "sparkles")
                 Text("El reloj solo vibra con lo importante.").font(.caption).foregroundStyle(.secondary)
-                Button("Solo llamadas, mensajes y WhatsApp") {
-                    selection = [.call, .SMS, .whatsApp]
-                    watch.setApps(selection)
+                Button("Llamadas, mensajes, WhatsApp y Teams") {
+                    var s: Set<FitCloudNotificationApp> = [.call, .SMS, .whatsApp]
+                    if let teams = NotifApp.all.first(where: { $0.app == .teams }), route(teams) != .unavailable {
+                        s.insert(key(teams))
+                    }
+                    selection = s
+                    watch.setApps(s)
                 }
                 .buttonStyle(GlassButtonStyle(prominent: true))
             }
             .glassCard()
 
             VStack(spacing: 0) {
-                ForEach(apps.filter { watch.supports($0.0) }, id: \.1) { item in
-                    Toggle(isOn: Binding(
-                        get: { selection.contains(item.0) },
-                        set: { on in
-                            if on { selection.insert(item.0) } else { selection.remove(item.0) }
-                            watch.setApps(selection)
-                        })) {
-                        Label(item.1, systemImage: item.2)
+                ForEach(NotifApp.all) { item in
+                    let r = route(item)
+                    HStack(spacing: 14) {
+                        AppIcon(item: item)
+                            .saturation(r == .unavailable ? 0 : 1)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name).font(.subheadline.weight(.medium))
+                            Text(r == .own ? "Icono propio en el reloj"
+                                 : r == .viaOther ? "Llega como «Otras apps» (icono genérico)"
+                                 : "Este firmware no lo muestra")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { selection.contains(key(item)) },
+                            set: { on in
+                                if on { selection.insert(key(item)) } else { selection.remove(key(item)) }
+                                watch.setApps(selection)
+                            }))
+                            .labelsHidden()
+                            .tint(item.colors.first ?? Palette.mint)
+                            .disabled(r == .unavailable)
                     }
-                    .tint(Palette.mint)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 9)
+                    if item.id != NotifApp.all.last?.id {
+                        Divider().opacity(0.4).padding(.leading, 50)
+                    }
                 }
             }
             .glassCard(padding: 16)
+
+            Text("Los iconos y el diseño de los avisos en la pantalla del reloj están dentro del firmware del K62; el SDK oficial no permite cambiarlos. Las apps sin categoría propia, como Teams en este firmware, llegan con el icono genérico.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
 
             Text("En el iPhone: Ajustes › Notificaciones › Mostrar previsualizaciones = Siempre, para que llegue el texto completo.")
                 .font(.caption).foregroundStyle(.secondary)
