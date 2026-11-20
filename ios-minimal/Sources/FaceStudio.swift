@@ -1,8 +1,49 @@
 import Foundation
 import UIKit
+import CoreImage
 import FitCloudKit
 import FitCloudDFUKit
 import FitCloudWFKit
+
+/// Everything the user chooses about how the time looks on the watch.
+/// Stored in UserDefaults (same keys as the @AppStorage controls in FaceView).
+struct FaceStyle: Equatable {
+    var position: FaceStudio.Position = .bottom
+    /// -1 = template default; 0…5 = the watch's own time/date styles (fonts), FitCloudWFKit `dtStyle`.
+    var timeStyle: Int = -1
+    var colorHex: String = "FFFFFF"
+    /// Frosted-glass panel drawn into the background behind the time.
+    var glass: Bool = true
+
+    var color: UIColor { UIColor(hex: colorHex) }
+
+    static var saved: FaceStyle {
+        let d = UserDefaults.standard
+        var s = FaceStyle()
+        if d.object(forKey: "k62.face.position") != nil {
+            s.position = FaceStudio.Position(rawValue: d.integer(forKey: "k62.face.position")) ?? .bottom
+        }
+        if d.object(forKey: "k62.face.timeStyle") != nil { s.timeStyle = d.integer(forKey: "k62.face.timeStyle") }
+        s.colorHex = d.string(forKey: "k62.face.colorHex") ?? "FFFFFF"
+        if d.object(forKey: "k62.face.glass") != nil { s.glass = d.bool(forKey: "k62.face.glass") }
+        return s
+    }
+}
+
+extension UIColor {
+    convenience init(hex: String) {
+        let v = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0xFFFFFF
+        self.init(red: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
+                  blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+    }
+
+    var hexString: String {
+        var r: CGFloat = 1, g: CGFloat = 1, b: CGFloat = 1, a: CGFloat = 1
+        getRed(&r, green: &g, blue: &b, alpha: &a)
+        func c(_ x: CGFloat) -> Int { Int((min(max(x, 0), 1) * 255).rounded()) }
+        return String(format: "%02X%02X%02X", c(r), c(g), c(b))
+    }
+}
 
 /// Builds a DIY watch face (own background + time) with FitCloudWFKit and
 /// installs it on the K62 through the official OTA/DFU path (silent UI DFU).
@@ -143,6 +184,87 @@ final class FaceStudio: NSObject, ObservableObject {
         return UIImage(named: "face_\(folder)_\(design)")
     }
 
+    // MARK: Composition (what is really written to the watch)
+
+    private static let ciContext = CIContext()
+    private static var composeCache: [String: UIImage] = [:]
+
+    static func screenSize(_ ui: FitCloudWatchfaceUIInfo?) -> CGSize {
+        let s = ui?.screenResolution() ?? .zero
+        return s.width > 0 && s.height > 0 ? s : CGSize(width: 240, height: 284)
+    }
+
+    /// Area where the firmware draws time + date for each position (approximate,
+    /// tuned for the K62 240×284 template; scales with the screen).
+    static func panelRect(_ size: CGSize, _ position: Position) -> CGRect {
+        let w = size.width, h = size.height
+        switch position {
+        case .top: return CGRect(x: w * 0.07, y: h * 0.07, width: w * 0.86, height: h * 0.36)
+        case .bottom: return CGRect(x: w * 0.07, y: h * 0.57, width: w * 0.86, height: h * 0.36)
+        case .left: return CGRect(x: w * 0.05, y: h * 0.28, width: w * 0.52, height: h * 0.44)
+        case .right: return CGRect(x: w * 0.43, y: h * 0.28, width: w * 0.52, height: h * 0.44)
+        }
+    }
+
+    /// Background at the exact screen size: photo (aspect fill) and, optionally,
+    /// a frosted-glass panel behind the time, so the watch itself gets the look.
+    static func compose(_ bk: UIImage, ui: FitCloudWatchfaceUIInfo?, style: FaceStyle) -> UIImage {
+        let size = screenSize(ui)
+        let key = "\(ObjectIdentifier(bk).hashValue)-\(Int(size.width))x\(Int(size.height))-\(style.position.rawValue)-\(style.glass)"
+        if let hit = composeCache[key] { return hit }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let rect = CGRect(origin: .zero, size: size)
+        let base = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(rect)
+            bk.draw(in: aspectFill(bk.size, in: rect))
+        }
+        var result = base
+        if style.glass {
+            let blurred = blur(base, radius: size.width * 0.07)
+            let panel = panelRect(size, style.position)
+            let path = UIBezierPath(roundedRect: panel, cornerRadius: min(panel.width, panel.height) * 0.24)
+            result = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+                base.draw(in: rect)
+                ctx.cgContext.saveGState()
+                path.addClip()
+                blurred.draw(in: rect)
+                UIColor.white.withAlphaComponent(0.14).setFill()
+                path.fill()
+                // Soft top light, like a glass edge.
+                let colors = [UIColor.white.withAlphaComponent(0.22).cgColor, UIColor.white.withAlphaComponent(0).cgColor] as CFArray
+                if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+                    ctx.cgContext.drawLinearGradient(g, start: CGPoint(x: panel.midX, y: panel.minY),
+                                                     end: CGPoint(x: panel.midX, y: panel.minY + panel.height * 0.5), options: [])
+                }
+                ctx.cgContext.restoreGState()
+                UIColor.white.withAlphaComponent(0.4).setStroke()
+                path.lineWidth = max(1, size.width * 0.006)
+                path.stroke()
+            }
+        }
+        if composeCache.count > 40 { composeCache.removeAll() }
+        composeCache[key] = result
+        return result
+    }
+
+    private static func aspectFill(_ img: CGSize, in rect: CGRect) -> CGRect {
+        guard img.width > 0, img.height > 0 else { return rect }
+        let k = max(rect.width / img.width, rect.height / img.height)
+        let w = img.width * k, h = img.height * k
+        return CGRect(x: rect.midX - w / 2, y: rect.midY - h / 2, width: w, height: h)
+    }
+
+    private static func blur(_ img: UIImage, radius: CGFloat) -> UIImage {
+        guard let ci = CIImage(image: img), let f = CIFilter(name: "CIGaussianBlur") else { return img }
+        f.setValue(ci.clampedToExtent(), forKey: kCIInputImageKey)
+        f.setValue(radius, forKey: kCIInputRadiusKey)
+        guard let out = f.outputImage?.cropped(to: ci.extent),
+              let cg = ciContext.createCGImage(out, from: ci.extent) else { return img }
+        return UIImage(cgImage: cg)
+    }
+
     /// Preview the watch shows in its face list: background + a sample time.
     static func preview(bk: UIImage, ui: FitCloudWatchfaceUIInfo?, position: Position, color: UIColor) -> UIImage {
         let size = ui?.screenResolution() ?? bk.size
@@ -252,22 +374,27 @@ final class FaceStudio: NSObject, ObservableObject {
 
     // MARK: Create + install
 
+    /// Installs a face using the saved FaceStyle (position, watch font style,
+    /// colour, glass panel). `compose: false` sends `bk` as-is (already designed).
     /// - Parameter onFinish: called on the main thread with the final result.
-    func install(bk: UIImage, ui: FitCloudWatchfaceUIInfo?, position: Position, color: UIColor,
+    func install(bk: UIImage, ui: FitCloudWatchfaceUIInfo?, style: FaceStyle = .saved, compose: Bool = true,
                  onFinish: ((Bool) -> Void)? = nil) {
         guard templateReady else { say("Falta la plantilla de esfera"); onFinish?(false); return }
         guard let fw = FitCloudKit.allConfig()?.firmware else { say("Reloj no listo"); onFinish?(false); return }
         guard begin(onFinish) else { onFinish?(false); return }
-        let preview = Self.preview(bk: bk, ui: ui, position: position, color: color)
+        let background = compose ? Self.compose(bk, ui: ui, style: style) : bk
+        let preview = Self.preview(bk: background, ui: ui, position: style.position, color: style.color)
+        let dtStyle: NSNumber? = (0...5).contains(style.timeStyle) ? NSNumber(value: style.timeStyle) : nil
+        say("Creando esfera (hora \(dtStyle.map { "estilo \($0.intValue + 1)" } ?? "por defecto"))…")
         FitCloudWFKit.create(withTemplateBin: Self.templateURL.path,
                              isNextGUI: fw.isNewGUIArchitecture,
                              rewriteNextGUIWatchfaceNo: nil,
-                             bkImage: bk,
+                             bkImage: background,
                              bkCornerRadius: 0,
                              preview: preview,
-                             dtPosition: position.sdk,
-                             dtStyle: nil,
-                             dtColor: color) { [weak self] p, tips in
+                             dtPosition: style.position.sdk,
+                             dtStyle: dtStyle,
+                             dtColor: style.color) { [weak self] p, tips in
             self?.onMain { self?.touch() }
             self?.say("Creando esfera \(Int(p * 100))% \(tips ?? "")")
         } logging: { _, _ in

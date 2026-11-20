@@ -82,8 +82,11 @@ struct HomeView: View {
 
     private var hero: some View {
         HStack(spacing: 18) {
-            WatchPreview(image: carousel.displayImage ?? FaceStudio.background(design, for: watch.faceUI),
-                         round: watch.faceUI?.isRound() ?? true, size: 118)
+            WatchPreview(image: (carousel.displayImage ?? FaceStudio.background(design, for: watch.faceUI))
+                            .map { FaceStudio.compose($0, ui: watch.faceUI, style: .saved) },
+                         round: watch.faceUI?.isRound() ?? false,
+                         position: FaceStyle.saved.position,
+                         timeColor: Color(uiColor: FaceStyle.saved.color), size: 118)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Circle().fill(watch.ready ? Palette.mint : watch.connected ? Color.orange : Color.gray)
@@ -172,51 +175,92 @@ struct FaceView: View {
     @EnvironmentObject var watch: Watch
     @EnvironmentObject var studio: FaceStudio
     @AppStorage("k62.face.design") private var design = "2-orbita"
-    @AppStorage("k62.face.position") private var positionRaw = 0
-    @AppStorage("k62.face.amber") private var amber = false
+    @AppStorage("k62.face.position") private var positionRaw = FaceStudio.Position.bottom.rawValue
+    @AppStorage("k62.face.timeStyle") private var timeStyle = -1
+    @AppStorage("k62.face.colorHex") private var colorHex = "FFFFFF"
+    @AppStorage("k62.face.glass") private var glass = true
     @State private var custom: UIImage?
     @State private var pick: PhotosPickerItem?
     @State private var importing = false
     @State private var confirm = false
 
-    private var position: FaceStudio.Position { FaceStudio.Position(rawValue: positionRaw) ?? .top }
+    private static let swatches = ["FFFFFF", "FFD6A0", "5EE0B5", "FF7A9C", "7CC4FF", "1C1C1E"]
+
+    private var position: FaceStudio.Position { FaceStudio.Position(rawValue: positionRaw) ?? .bottom }
+    private var style: FaceStyle { FaceStyle(position: position, timeStyle: timeStyle, colorHex: colorHex, glass: glass) }
     private var background: UIImage? { custom ?? FaceStudio.background(design, for: watch.faceUI) }
-    private var color: UIColor { amber ? UIColor(red: 1, green: 0.84, blue: 0.63, alpha: 1) : .white }
-    private var round: Bool { watch.faceUI?.isRound() ?? true }
+    /// Exactly the background that will be written to the watch.
+    private var composed: UIImage? { background.map { FaceStudio.compose($0, ui: watch.faceUI, style: style) } }
+    private var round: Bool { watch.faceUI?.isRound() ?? false }
+    private var colorBinding: Binding<Color> {
+        Binding(get: { Color(uiColor: UIColor(hex: colorHex)) },
+                set: { colorHex = UIColor($0).hexString })
+    }
 
     var body: some View {
         Page(title: "Esfera") {
-            WatchPreview(image: background, round: round, position: position, amber: amber, size: 230)
+            WatchPreview(image: composed, round: round, position: position,
+                         timeColor: Color(uiColor: UIColor(hex: colorHex)), size: 230)
                 .padding(.vertical, 12)
 
             VStack(alignment: .leading, spacing: 14) {
-                SectionTitle(text: "Diseño", icon: "paintbrush")
+                SectionTitle(text: "Fondo", icon: "photo")
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 14) {
+                    HStack(spacing: 12) {
                         ForEach(FaceStudio.designs, id: \.self) { d in
                             if let img = FaceStudio.background(d, for: watch.faceUI) {
+                                let selected = design == d && custom == nil
+                                let shape = RoundedRectangle(cornerRadius: round ? 32 : 12, style: .continuous)
                                 Image(uiImage: img).resizable().scaledToFill()
-                                    .frame(width: 60, height: 60)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().strokeBorder(design == d && custom == nil ? Palette.mint : Color.white.opacity(0.2),
-                                                                   lineWidth: design == d && custom == nil ? 3 : 1))
-                                    .onTapGesture {
-                                        withAnimation(.spring()) { design = d; custom = nil; amber = d.contains("ambar") }
-                                    }
+                                    .frame(width: 54, height: round ? 54 : 64)
+                                    .clipShape(shape)
+                                    .overlay(shape.strokeBorder(selected ? Palette.mint : Color.white.opacity(0.25),
+                                                                lineWidth: selected ? 3 : 1))
+                                    .onTapGesture { withAnimation(.spring()) { design = d; custom = nil } }
                             }
                         }
                     }
                     .padding(.vertical, 4)
                 }
                 PhotosPicker(selection: $pick, matching: .images) {
-                    Label("Usar una foto propia", systemImage: "photo")
+                    Label(custom == nil ? "Usar una foto propia" : "Cambiar foto", systemImage: "photo.on.rectangle")
                 }
                 .buttonStyle(GlassButtonStyle())
-                Picker("Hora", selection: $positionRaw) {
+                Toggle(isOn: $glass) {
+                    Label("Panel de cristal detrás de la hora", systemImage: "rectangle.on.rectangle")
+                }
+                .tint(Palette.mint)
+            }
+            .glassCard()
+
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(text: "Hora en el reloj", icon: "textformat.size")
+                Picker("Posición", selection: $positionRaw) {
                     ForEach(FaceStudio.Position.allCases) { Text($0.label).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
-                Toggle("Hora en ámbar", isOn: $amber)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Tipografía del reloj").font(.subheadline.weight(.medium))
+                    Picker("Tipografía", selection: $timeStyle) {
+                        Text("Auto").tag(-1)
+                        ForEach(0..<6, id: \.self) { Text("\($0 + 1)").tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Text("Son los estilos de hora y fecha que trae el firmware del K62 (más gruesos o más finos). La vista previa es aproximada: prueba cada número en el reloj.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 10) {
+                    ForEach(Self.swatches, id: \.self) { hex in
+                        Circle().fill(Color(uiColor: UIColor(hex: hex)))
+                            .frame(width: 30, height: 30)
+                            .overlay(Circle().strokeBorder(Color.primary.opacity(colorHex == hex ? 0.85 : 0.2),
+                                                           lineWidth: colorHex == hex ? 2.5 : 1))
+                            .onTapGesture { colorHex = hex }
+                    }
+                    Spacer(minLength: 0)
+                    ColorPicker("Color de la hora", selection: colorBinding, supportsOpacity: false)
+                        .labelsHidden()
+                }
             }
             .glassCard()
 
@@ -280,7 +324,7 @@ struct FaceView: View {
         }
         .confirmationDialog("¿Instalar esta esfera en el K62?", isPresented: $confirm, titleVisibility: .visible) {
             Button("Instalar") {
-                if let bk = background { studio.install(bk: bk, ui: watch.faceUI, position: position, color: color) }
+                if let bk = background { studio.install(bk: bk, ui: watch.faceUI, style: style) }
             }
         } message: {
             Text("El reloj entrará en modo de actualización durante la transferencia. Mantenlo cerca del iPhone.")
@@ -306,10 +350,17 @@ struct PhotosView: View {
     @EnvironmentObject var watch: Watch
     @EnvironmentObject var studio: FaceStudio
     @EnvironmentObject var carousel: PhotoCarousel
-    @AppStorage("k62.face.position") private var positionRaw = 0
-    @AppStorage("k62.face.amber") private var amber = false
+    @AppStorage("k62.face.position") private var positionRaw = FaceStudio.Position.bottom.rawValue
+    @AppStorage("k62.face.colorHex") private var colorHex = "FFFFFF"
+    @AppStorage("k62.face.glass") private var glass = true
+    @AppStorage("k62.face.timeStyle") private var timeStyle = -1
     @State private var items: [PhotosPickerItem] = []
     @State private var pickNote: String?
+
+    private var style: FaceStyle {
+        FaceStyle(position: FaceStudio.Position(rawValue: positionRaw) ?? .bottom,
+                  timeStyle: timeStyle, colorHex: colorHex, glass: glass)
+    }
 
     private let intervals = [1, 3, 6, 12, 24]
 
@@ -318,8 +369,9 @@ struct PhotosView: View {
             // The carousel timer changes displayIndex inside withAnimation, so the
             // new identity cross-fades in.
             ZStack {
-                WatchPreview(image: carousel.displayImage, round: watch.faceUI?.isRound() ?? true,
-                             position: FaceStudio.Position(rawValue: positionRaw) ?? .top, amber: amber, size: 230)
+                WatchPreview(image: carousel.displayImage.map { FaceStudio.compose($0, ui: watch.faceUI, style: style) },
+                             round: watch.faceUI?.isRound() ?? false,
+                             position: style.position, timeColor: Color(uiColor: style.color), size: 230)
                     .id(carousel.displayIndex)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }

@@ -199,7 +199,7 @@ final class PetEngine: ObservableObject {
 
     @MainActor
     func faceImage(for ui: FitCloudWatchfaceUIInfo?) -> UIImage? {
-        let size = ui?.screenResolution() ?? CGSize(width: 466, height: 466)
+        let size = FaceStudio.screenSize(ui)
         let side = min(size.width, size.height)
         let content = ZStack {
             Color.black
@@ -217,7 +217,12 @@ final class PetEngine: ObservableObject {
         guard !installing, let img = faceImage(for: Watch.shared.faceUI) else { return }
         installing = true
         let current = mood.rawValue
-        FaceStudio.shared.install(bk: img, ui: Watch.shared.faceUI, position: .top, color: .white) { [weak self] ok in
+        // The pet image is already designed (pet low, time on top): keep the
+        // chosen watch font and colour, but no glass panel and time on top.
+        var style = FaceStyle.saved
+        style.position = .top
+        style.glass = false
+        FaceStudio.shared.install(bk: img, ui: Watch.shared.faceUI, style: style, compose: false) { [weak self] ok in
             guard let self else { return }
             self.installing = false
             guard ok else { return }

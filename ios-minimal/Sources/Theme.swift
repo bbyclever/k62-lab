@@ -195,7 +195,7 @@ struct WatchPreview: View {
     var round = true
     var showTime = true
     var position: FaceStudio.Position = .top
-    var amber = false
+    var timeColor: Color = .white
     var size: CGFloat = 200
 
     var body: some View {
@@ -207,18 +207,25 @@ struct WatchPreview: View {
                 Image(uiImage: image).resizable().scaledToFill()
             }
             if showTime {
+                // Approximation: the real digits are drawn by the watch firmware
+                // with the selected time style.
                 TimelineView(.everyMinute) { context in
-                    Text(context.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-                        .font(.system(size: size * 0.2, weight: .thin, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(amber ? Color(red: 1, green: 0.84, blue: 0.63) : .white)
-                        .shadow(color: .black.opacity(0.4), radius: 6)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-                        .padding(size * 0.16)
+                    VStack(spacing: size * 0.01) {
+                        Text(context.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+                            .font(.system(size: size * 0.2, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                        Text(context.date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                            .font(.system(size: size * 0.065, weight: .medium, design: .rounded))
+                            .opacity(0.85)
+                    }
+                    .foregroundStyle(timeColor)
+                    .shadow(color: .black.opacity(0.35), radius: 5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+                    .padding(size * 0.13)
                 }
             }
         }
-        .frame(width: size, height: round ? size : size * 1.22)
+        .frame(width: size, height: round ? size : size * 284 / 240)
         .clipShape(shape)
         .overlay(shape.stroke(LinearGradient(colors: [.white.opacity(0.5), .white.opacity(0.05)],
                                              startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 3))

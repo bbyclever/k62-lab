@@ -226,8 +226,10 @@ final class Watch: NSObject, ObservableObject {
             let diy = FitCloudKit.isDeviceSupport(.WATCHFACEDIYANDOTA)
             let faceOTA = FitCloudKit.isDeviceSupport(.WATCHFACEOTA)
             let album = fw.allowPhotoPush || FitCloudKit.isDeviceSupport(.PHOTOALBUMOTA)
+            let multi = cfg.watchfaceCapabilities?.supportsMultipleImages ?? false
             firmwareCapabilities = [
                 Capability(name: "Esfera con foto propia", value: yes(diy), good: diy),
+                Capability(name: "Esfera con varias fotos", value: yes(multi), good: multi),
                 Capability(name: "Álbum de fotos", value: yes(album), good: album),
                 Capability(name: "Subir esferas", value: yes(faceOTA), good: faceOTA),
                 Capability(name: "WhatsApp (leer y responder)", value: yes(fw.supportsWhatsApp), good: fw.supportsWhatsApp),

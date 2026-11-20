@@ -144,11 +144,9 @@ final class PhotoCarousel: ObservableObject {
               FaceStudio.shared.templateReady else { return }
         if !force, let last = lastRotation, Date().timeIntervalSince(last) < Double(intervalHours) * 3600 { return }
         guard let img = nextWatchImage else { return }
-        let pos = FaceStudio.Position(rawValue: defaults.integer(forKey: "k62.face.position")) ?? .top
-        let amber = defaults.bool(forKey: "k62.face.amber")
         rotating = true
-        FaceStudio.shared.install(bk: img, ui: Watch.shared.faceUI, position: pos,
-                                  color: amber ? UIColor(red: 1, green: 0.84, blue: 0.63, alpha: 1) : .white) { [weak self] ok in
+        // Same look as the Esfera tab: watch font style, colour and glass panel.
+        FaceStudio.shared.install(bk: img, ui: Watch.shared.faceUI, style: .saved) { [weak self] ok in
             guard let self else { return }
             self.rotating = false
             // Only advance when the watch really got the new face; on failure the
