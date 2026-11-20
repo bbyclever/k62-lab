@@ -45,7 +45,16 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/dd" \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee "$RUNNER_TEMP/build.log" || {
+              # Surface compiler errors as run annotations (readable without logs access).
+              grep -E "error:|ld: |Undefined symbol" "$RUNNER_TEMP/build.log" | sed -E 's#^/Users/runner/work/[^/]+/[^/]+/##' | sort -u | head -40 > "$RUNNER_TEMP/errors.txt" || true
+              i=0
+              while IFS= read -r line; do
+                i=$((i+1)); [ $i -le 9 ] && echo "::error title=build $i::${line}"
+              done < "$RUNNER_TEMP/errors.txt"
+              echo "::error title=build all::$(sed ':a;N;$!ba;s/\n/%0A/g' "$RUNNER_TEMP/errors.txt")"
+              exit 65
+            }
 
       - name: Package unsigned IPA
         run: |
