@@ -29,6 +29,7 @@ struct WatchView: View {
                             .frame(width: 10, height: 10)
                         Text(watch.status)
                     }
+                    row("Bluetooth", watch.bluetooth)
                     if watch.ready {
                         row("Batería", watch.battery.map { "\($0)%" } ?? "—")
                         row("Firmware", watch.firmware)
@@ -46,7 +47,8 @@ struct WatchView: View {
                                 HStack {
                                     Text(d.name)
                                     Spacer()
-                                    Text("\(d.rssi) dBm").foregroundStyle(.secondary).font(.caption)
+                                    Text(d.rssi.map { "\($0) dBm" } ?? "conectado a iOS")
+                                        .foregroundStyle(.secondary).font(.caption)
                                 }
                             }
                         }

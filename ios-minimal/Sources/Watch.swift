@@ -11,8 +11,8 @@ final class Watch: NSObject, ObservableObject {
     struct Device: Identifiable {
         let id: UUID
         let name: String
-        let rssi: Int
-        let fc: FitCloudPeripheral
+        let rssi: Int?          // nil = already connected to iOS (not advertising)
+        let peripheral: CBPeripheral
     }
 
     struct Capability: Identifiable {
@@ -23,6 +23,7 @@ final class Watch: NSObject, ObservableObject {
     }
 
     @Published var status = "Iniciando…"
+    @Published var bluetooth = "—"
     @Published var devices: [Device] = []
     @Published var scanning = false
     @Published var connected = false
@@ -43,9 +44,17 @@ final class Watch: NSObject, ObservableObject {
         return id
     }
 
+    /// Own Core Bluetooth central: asks for the Bluetooth permission at launch and
+    /// finds a K62 that iOS already keeps connected (it then stops advertising).
+    private var central: CBCentralManager?
+    private var systemConnected: [UUID: Device] = [:]
+    private static let k62Services = [CBUUID(string: "FEE7"),
+                                      CBUUID(string: "000001FF-3C17-D293-8E48-14FE2E4DA212")]
+
     private override init() { super.init() }
 
     func start() {
+        central = CBCentralManager(delegate: self, queue: .main)
         let option = FitCloudOption()
         option.debugMode = false
         option.shouldAutoReconnectWhenAppLaunch = true
@@ -105,7 +114,9 @@ final class Watch: NSObject, ObservableObject {
 
     func scan() {
         devices = []
+        systemConnected = [:]
         scanning = true
+        recoverSystemConnected()
         FitCloudKit.startScan()
         set("Buscando relojes…")
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
@@ -119,13 +130,40 @@ final class Watch: NSObject, ObservableObject {
     }
 
     private func refreshDevices() {
-        devices = FitCloudKit.discoveredDevices().map {
-            Device(id: $0.peripheral.identifier, name: $0.peripheral.name ?? "Sin nombre",
-                   rssi: $0.rssi?.intValue ?? -127, fc: $0)
+        var all = systemConnected
+        for fc in FitCloudKit.discoveredDevices() {
+            let p: CBPeripheral = fc.peripheral
+            all[p.identifier] = Device(id: p.identifier, name: p.name ?? "Sin nombre",
+                                       rssi: fc.rssi?.intValue ?? -127, peripheral: p)
         }
-        .sorted { a, b in
+        devices = all.values.sorted { a, b in
             let ka = a.name.uppercased().hasPrefix("K62"), kb = b.name.uppercased().hasPrefix("K62")
-            return ka != kb ? ka : a.rssi > b.rssi
+            return ka != kb ? ka : (a.rssi ?? 0) > (b.rssi ?? 0)
+        }
+    }
+
+    /// A K62 already connected to iOS (ANCS / audio) does not advertise, so a
+    /// normal scan misses it. Retrieve it and let the SDK make it connectable.
+    private func recoverSystemConnected() {
+        guard let central, central.state == .poweredOn else {
+            note("Bluetooth no listo: \(bluetooth)")
+            return
+        }
+        let found = central.retrieveConnectedPeripherals(withServices: Self.k62Services)
+        note("Conectados a iOS con servicios del K62: \(found.count)")
+        for p in found {
+            FitCloudKit.resolveConnectablePeripheral(from: p) { [weak self] ok, err, cp in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    guard ok, let cp else {
+                        self.note("No se pudo preparar \(p.name ?? "reloj"): \(err?.localizedDescription ?? "-")")
+                        return
+                    }
+                    self.systemConnected[cp.identifier] = Device(id: cp.identifier, name: cp.name ?? p.name ?? "K62",
+                                                                 rssi: nil, peripheral: cp)
+                    self.refreshDevices()
+                }
+            }
         }
     }
 
@@ -133,7 +171,7 @@ final class Watch: NSObject, ObservableObject {
     func bind(_ d: Device) {
         stopScan()
         note("Vinculando \(d.name) con usuario local")
-        FitCloudKit.connectAndBind(d.fc.peripheral, userId: userId, randomCode: nil, withClassicBT: true)
+        FitCloudKit.connectAndBind(d.peripheral, userId: userId, randomCode: nil, withClassicBT: true)
     }
 
     func disconnect() {
@@ -224,6 +262,23 @@ final class Watch: NSObject, ObservableObject {
         f.dateFormat = "HH:mm:ss"
         log.insert("\(f.string(from: Date())) \(s)", at: 0)
         if log.count > 200 { log.removeLast() }
+    }
+}
+
+extension Watch: CBCentralManagerDelegate {
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        switch CBManager.authorization {
+        case .denied, .restricted:
+            bluetooth = "Permiso denegado: Ajustes › K62 Minimal › Bluetooth"
+        default:
+            switch central.state {
+            case .poweredOn: bluetooth = "Activo"
+            case .poweredOff: bluetooth = "Apagado en el iPhone"
+            case .unauthorized: bluetooth = "Sin permiso"
+            default: bluetooth = "No disponible"
+            }
+        }
+        note("Bluetooth: \(bluetooth)")
     }
 }
 
