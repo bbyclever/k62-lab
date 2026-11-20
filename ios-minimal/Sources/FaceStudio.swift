@@ -24,6 +24,11 @@ final class FaceStudio: NSObject, ObservableObject {
     static let templateURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("k62-diy-template.bin")
 
+    /// Files waiting to be sent (album photos are sent one after another).
+    private var queue: [String] = []
+    private var total = 0
+    private var waitingForReconnect = false
+
     private override init() {
         super.init()
         FitCloudDFUKit.setDelegate(self)
@@ -31,6 +36,65 @@ final class FaceStudio: NSObject, ObservableObject {
                                                object: nil, queue: .main) { [weak self] _ in
             self?.say("El reloj volvió en modo DFU; saliendo del modo DFU")
             FitCloudKit.exitDFUMode { _, _ in }
+        }
+        // After a DFU transfer the watch reconnects; continue with the next file.
+        NotificationCenter.default.addObserver(forName: Notification.Name(FITCLOUDEVENT_PREPARESYNCWORK_END_NOTIFY),
+                                               object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.waitingForReconnect else { return }
+            self.waitingForReconnect = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.pushNext() }
+        }
+    }
+
+    // MARK: Photo album (native watch feature)
+
+    var albumSupported: Bool {
+        FitCloudKit.allConfig()?.firmware?.allowPhotoPush == true || FitCloudKit.isDeviceSupport(.PHOTOALBUMOTA)
+    }
+
+    func sendAlbum(_ images: [UIImage]) {
+        guard !images.isEmpty else { say("Añade fotos primero"); return }
+        guard albumSupported else { say("Este firmware no declara álbum de fotos"); return }
+        DispatchQueue.main.async { self.busy = true; self.progress = 0 }
+        say("Preparando \(images.count) fotos…")
+        FitCloudKit.getPhotoPushParams { [weak self] ok, params, err in
+            guard let self else { return }
+            guard ok, let params else { self.fail("Parámetros de álbum no disponibles: \(err?.localizedDescription ?? "-")"); return }
+            let p = DevicePhotoCreateParams()
+            p.isRound = params.isRound
+            p.width = params.width
+            p.height = params.height
+            p.cornerRadius = params.cornerRadius
+            p.previewWidth = params.previewWidth
+            p.previewHeight = params.previewHeight
+            p.previewCornerRadius = params.previewCornerRadius
+            p.photoAlbumPreviewWidth = params.photoAlbumPreviewWidth
+            p.photoAlbumPreviewHeight = params.photoAlbumPreviewHeight
+            p.photoAlbumPreviewCornerRadius = params.photoAlbumPreviewCornerRadius
+            self.makePhotoBins(images, params: p, done: [], index: 0)
+        }
+    }
+
+    private func makePhotoBins(_ images: [UIImage], params: DevicePhotoCreateParams, done: [String], index: Int) {
+        guard index < images.count else {
+            if done.isEmpty { fail("No se pudo convertir ninguna foto") } else { push(done) }
+            return
+        }
+        say("Convirtiendo foto \(index + 1) de \(images.count)…")
+        FitCloudWFKit.createPhotoBin(with: images[index], parameters: params, logging: nil) { [weak self] ok, path, err in
+            guard let self else { return }
+            var acc = done
+            if ok, let path {
+                // Keep a private copy: the SDK may reuse its output path.
+                let dst = FileManager.default.temporaryDirectory.appendingPathComponent("k62-photo-\(index).bin")
+                try? FileManager.default.removeItem(at: dst)
+                if (try? FileManager.default.copyItem(at: URL(fileURLWithPath: path), to: dst)) != nil {
+                    acc.append(dst.path)
+                }
+            } else {
+                self.say("Foto \(index + 1) omitida: \(err?.localizedDescription ?? "-")")
+            }
+            self.makePhotoBins(images, params: params, done: acc, index: index + 1)
         }
     }
 
@@ -155,7 +219,34 @@ final class FaceStudio: NSObject, ObservableObject {
                 return
             }
             self.say("Esfera creada; enviando al reloj…")
-            if fw.withNewOTA { self.pushNewOTA(binPath) } else { self.pushDFU(binPath) }
+            self.push([binPath])
+        }
+    }
+
+    // MARK: Transfer queue
+
+    private func push(_ paths: [String]) {
+        queue = paths
+        total = paths.count
+        pushNext()
+    }
+
+    private func pushNext() {
+        guard !queue.isEmpty else {
+            done(total > 1 ? "\(total) archivos enviados al reloj" : "Instalado en el reloj")
+            return
+        }
+        guard let fw = FitCloudKit.allConfig()?.firmware else { fail("Reloj no listo"); return }
+        let path = queue.removeFirst()
+        if total > 1 { say("Enviando \(total - queue.count) de \(total)…") }
+        if fw.withNewOTA { pushNewOTA(path) } else { pushDFU(path) }
+    }
+
+    private func itemFinished() {
+        if queue.isEmpty {
+            pushNext()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.pushNext() }
         }
     }
 
@@ -164,8 +255,8 @@ final class FaceStudio: NSObject, ObservableObject {
             if !started { self?.fail("OTA no inició: \(err?.localizedDescription ?? "-")") }
         } progress: { [weak self] p in
             DispatchQueue.main.async { self?.progress = Double(p) }
-        } completion: { [weak self] ok, speed, err in
-            if ok { self?.done("Esfera instalada (\(Int(speed)) KB/s)") }
+        } completion: { [weak self] ok, _, err in
+            if ok { self?.itemFinished() }
             else { self?.fail("OTA falló: \(err?.localizedDescription ?? "-")") }
         }
     }
@@ -192,6 +283,8 @@ final class FaceStudio: NSObject, ObservableObject {
 
     private func fail(_ s: String) {
         say(s)
+        queue = []
+        waitingForReconnect = false
         DispatchQueue.main.async { self.busy = false }
     }
 
@@ -212,6 +305,13 @@ extension FaceStudio: FitCloudDFUDelegate {
         DispatchQueue.main.async { self.progress = Double(progress) / 100 }
     }
     func onAbortWithError(_ error: Error) { fail("DFU abortado: \(error.localizedDescription)") }
-    func onDFUFinish(withSpeed speed: CGFloat) { done("Esfera instalada; el reloj se reinicia la interfaz") }
+    func onDFUFinish(withSpeed speed: CGFloat) {
+        if queue.isEmpty {
+            done(total > 1 ? "\(total) archivos enviados; el reloj reinicia su interfaz" : "Instalado; el reloj reinicia su interfaz")
+        } else {
+            say("Archivo enviado; esperando a que el reloj vuelva a conectar…")
+            waitingForReconnect = true
+        }
+    }
     func onDFULogMessage(_ message: String, level: FCDFUKLogLevel) {}
 }

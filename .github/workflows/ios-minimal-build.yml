@@ -23,6 +23,12 @@ jobs:
       - name: Fetch official FitCloudPro SDK
         run: git clone --depth 1 https://github.com/htangsmart/FitCloudPro-SDK-iOS.git Vendor/FitCloudPro-SDK-iOS
 
+      - name: Select newest stable Xcode (Liquid Glass needs the iOS 26+ SDK)
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app | grep -viE 'beta|rc' | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+          echo "::notice title=Xcode::$X · $(xcodebuild -version | tr '\n' ' ')"
+
       - name: Tools
         run: |
           xcodebuild -version

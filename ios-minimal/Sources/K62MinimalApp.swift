@@ -4,6 +4,9 @@ import SwiftUI
 struct K62MinimalApp: App {
     @StateObject private var watch = Watch.shared
     @StateObject private var studio = FaceStudio.shared
+    @StateObject private var carousel = PhotoCarousel.shared
+    @AppStorage("k62.theme") private var theme = AppTheme.system.rawValue
+    @Environment(\.scenePhase) private var phase
 
     init() {
         Watch.shared.start()
@@ -14,8 +17,12 @@ struct K62MinimalApp: App {
             RootView()
                 .environmentObject(watch)
                 .environmentObject(studio)
-                .preferredColorScheme(.dark)
-                .tint(Color(red: 0.37, green: 0.88, blue: 0.71))
+                .environmentObject(carousel)
+                .preferredColorScheme((AppTheme(rawValue: theme) ?? .system).scheme)
+                .tint(Palette.mint)
+        }
+        .onChange(of: phase) { p in
+            if p == .active { PhotoCarousel.shared.rotateIfDue() }
         }
     }
 }
