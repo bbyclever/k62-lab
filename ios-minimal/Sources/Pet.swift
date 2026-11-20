@@ -185,7 +185,11 @@ final class PetEngine: ObservableObject {
             FitCloudKit.getSupportedGames { [weak self] ok, games, _ in
                 DispatchQueue.main.async {
                     guard ok else { return }
-                    self?.hasNativePetGame = (games ?? []).contains { $0.category == .PETDEV }
+                    // FITCLOUDGAME_PETDEV = 0 ("pet raising game") in FitCloudKitDefines.h
+                    let list: [FitCloudGameObject] = games ?? []
+                    self?.hasNativePetGame = list.contains { (game: FitCloudGameObject) -> Bool in
+                        game.category.rawValue == 0
+                    }
                 }
             }
         }
