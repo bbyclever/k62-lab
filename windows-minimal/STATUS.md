@@ -45,7 +45,7 @@ El fabricante publica su SDK oficial ([FitCloudPro-SDK-iOS](https://github.com/h
 - **esferas DIY instaladas en el reloj** (FitCloudWFKit + OTA/DFU oficial);
 - **complemento WhatsApp** para leer y responder desde el reloj, si el firmware declara `supportsWhatsApp`.
 
-Estado: código escrito y **no compilado**, porque en Windows no hay Xcode. Se compila con `.github/workflows/ios-minimal-build.yml`, que requiere subir el repositorio a GitHub; se instala con firma propia.
+Estado (19-11-2026): **compila en GitHub Actions** (run 44647361717, artefacto `K62Minimal-unsigned-ipa`, 10,9 MB). **Aún sin instalar ni probar en el reloj.** Se instala firmando el IPA con tu propio Apple ID.
 
 ## Próxima tarea concreta
 
