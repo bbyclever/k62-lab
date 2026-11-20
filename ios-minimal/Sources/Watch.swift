@@ -152,8 +152,8 @@ final class Watch: NSObject, ObservableObject {
             let platform = hw & (1 << 26) != 0 ? "gui-8773" : hw & (1 << 27) != 0 ? "gui-5681" : "gui"
             capabilities = [
                 Capability(name: "WhatsApp (leer y responder)", value: fw.supportsWhatsApp ? "Sí" : "No", good: fw.supportsWhatsApp),
-                Capability(name: "Esfera DIY + subida", value: yes(FitCloudKit.isDeviceSupportFeature(.WATCHFACEDIYANDOTA)), good: FitCloudKit.isDeviceSupportFeature(.WATCHFACEDIYANDOTA)),
-                Capability(name: "Subir esferas", value: yes(FitCloudKit.isDeviceSupportFeature(.WATCHFACEOTA)), good: FitCloudKit.isDeviceSupportFeature(.WATCHFACEOTA)),
+                Capability(name: "Esfera DIY + subida", value: yes(FitCloudKit.isDeviceSupport(.WATCHFACEDIYANDOTA)), good: FitCloudKit.isDeviceSupport(.WATCHFACEDIYANDOTA)),
+                Capability(name: "Subir esferas", value: yes(FitCloudKit.isDeviceSupport(.WATCHFACEOTA)), good: FitCloudKit.isDeviceSupport(.WATCHFACEOTA)),
                 Capability(name: "Arquitectura GUI nueva", value: yes(fw.isNewGUIArchitecture), good: true),
                 Capability(name: "OTA nuevo", value: yes(fw.withNewOTA), good: true),
                 Capability(name: "Plataforma", value: platform, good: true),
